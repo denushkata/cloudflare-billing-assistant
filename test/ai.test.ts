@@ -83,8 +83,20 @@ describe("guardrail and prompt", () => {
 
   it("gives the model formatted amounts only, never raw cents", () => {
     const facts = promptFacts(finding("a"));
-    expect(facts).toMatchObject({ expected: "-$75.00", invoiced: "$0.00", difference: "$75.00", direction: "customer overcharged" });
+    expect(facts).toMatchObject({
+      expected: "-$75.00",
+      invoiced: "$0.00",
+      difference: "$75.00",
+      direction: "customer overcharged",
+      standard_remedy: "corrected invoice or credit to the customer",
+    });
     expect(JSON.stringify(facts)).not.toContain("Cents");
+  });
+
+  it("picks the remedy from the direction of the difference", () => {
+    const remedy = (o: Partial<Finding>) => promptFacts(finding("a", o)).standard_remedy;
+    expect(remedy({ differenceCents: -2000 })).toBe("corrected invoice or supplemental charge for the shortfall");
+    expect(remedy({ severity: "explained", differenceCents: 0 })).toBe("none: the invoice is correct");
   });
 });
 

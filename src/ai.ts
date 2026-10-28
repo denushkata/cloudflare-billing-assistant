@@ -6,7 +6,9 @@ import { formatCents } from "./recon/money";
 import type { Finding } from "./recon/reconcile";
 
 export const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-export const AI_TIMEOUT_MS = 8_000;
+// Observed 4.6-7.3s for the whole parallel batch against the live model; 10s leaves headroom
+// without making a reviewer wait long when the service is degraded.
+export const AI_TIMEOUT_MS = 10_000;
 
 export interface AiRunner {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
@@ -22,8 +24,8 @@ Rules:
 - Never calculate, estimate, round or convert anything. Do not introduce any dollar amount or percentage that is not in the facts; you may repeat amounts exactly as given.
 - Write for a finance analyst: plain English, specific, no filler.
 - "explanation": at most two sentences on what happened on this invoice.
-- "likely_cause": one sentence on the most plausible upstream cause in the billing or usage pipeline.
-- "suggested_fix": one sentence on what the analyst should do for this customer now.
+- "likely_cause": one short sentence on the most plausible upstream cause in the billing or usage pipeline.
+- "suggested_fix": one short sentence on what the analyst should do for this customer now, based on "standard_remedy". Do not assume whether the invoice has been paid, and never suggest a credit when the customer was undercharged.
 - If severity is "explained", the invoice is correct: explain why it looks different and suggest no correction.`;
 
 const RESPONSE_SCHEMA = {
@@ -60,7 +62,7 @@ async function explainOne(ai: AiRunner, finding: Finding, timeoutMs: number): Pr
           { role: "user", content: JSON.stringify(facts, null, 2) },
         ],
         response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
-        max_tokens: 300,
+        max_tokens: 250,
         temperature: 0.2,
       }),
       timeout,
@@ -90,6 +92,15 @@ export function promptFacts(f: Finding) {
     invoiced: formatCents(f.invoicedCents),
     difference: formatCents(f.differenceCents),
     direction: f.differenceCents > 0 ? "customer overcharged" : f.differenceCents < 0 ? "customer undercharged" : "no net difference",
+    // The remedy follows from the direction, so code picks it; the model only phrases it.
+    standard_remedy:
+      f.severity === "explained"
+        ? "none: the invoice is correct"
+        : f.differenceCents > 0
+          ? "corrected invoice or credit to the customer"
+          : f.differenceCents < 0
+            ? "corrected invoice or supplemental charge for the shortfall"
+            : "correct the invoice record; no amount is owed either way",
     calculated_summary: f.summary,
     details: f.facts,
   };

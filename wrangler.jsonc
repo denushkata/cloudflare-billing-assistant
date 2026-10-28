@@ -6,7 +6,8 @@
   "observability": { "enabled": true },
   // Front end; the Worker handles /api/* first and everything else falls through to these files.
   "assets": { "directory": "public", "run_worker_first": ["/api/*"] },
-  "ai": { "binding": "AI" },
+  // Workers AI always runs on Cloudflare, even under `wrangler dev`.
+  "ai": { "binding": "AI", "remote": true },
   // Sample CSVs are bundled so the demo button needs no uploads.
   "rules": [{ "type": "Text", "globs": ["**/*.csv"], "fallthrough": true }]
 }
