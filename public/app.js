@@ -115,8 +115,7 @@ $("#reset").addEventListener("click", async () => {
 
 function renderResults(data) {
   const findings = data.invoices.flatMap((inv) => inv.findings);
-  const errors = findings.filter((f) => f.severity === "error");
-  const explained = findings.filter((f) => f.severity === "explained");
+  current = data;
   const aiOk = findings.filter((f) => f.ai?.status === "ok").length;
   const sourceNote = Object.values(data.sources).includes("uploaded")
     ? ` · files: ${Object.entries(data.sources).map(([k, v]) => `${k} ${v}`).join(", ")}`
@@ -141,11 +140,87 @@ function renderResults(data) {
       ),
       data.warnings.map((w) => h("p", { class: "warn" }, w)),
     ),
+    toolbar(data),
+    listsEl,
+  );
+  renderLists();
+}
+
+// ---------- slicing and sorting (client-side view only) ----------
+
+let current = null; // last reconciliation response
+const filters = { customer: "", period: "", status: "", sort: "customer" };
+const listsEl = h("div", { class: "lists" });
+const STATUS_ORDER = { open: 0, escalated: 1, resolved: 2, explained: 3, flagged: 0, clean: 4 };
+const SORTS = {
+  customer: { label: "Customer", cmp: (a, b) => a.customerId.localeCompare(b.customerId) || a.invoiceId.localeCompare(b.invoiceId) },
+  period: { label: "Period, newest first", cmp: (a, b) => b.period.localeCompare(a.period) || a.customerId.localeCompare(b.customerId) },
+  decided: {
+    label: "Recently decided",
+    cmp: (a, b) => (b.decidedAt ?? "").localeCompare(a.decidedAt ?? "") || a.customerId.localeCompare(b.customerId),
+  },
+  status: { label: "Status", cmp: (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.customerId.localeCompare(b.customerId) },
+  difference: {
+    label: "Largest difference",
+    cmp: (a, b) => Math.abs(b.differenceCents) - Math.abs(a.differenceCents) || a.customerId.localeCompare(b.customerId),
+  },
+};
+
+function toolbar(data) {
+  const customers = [...new Set(data.invoices.map((i) => i.customerId))].sort();
+  const periods = [...new Set(data.invoices.map((i) => i.period))].sort().reverse();
+  // Keep a choice that still exists in the new results; drop one that doesn't.
+  if (!customers.includes(filters.customer)) filters.customer = "";
+  if (!periods.includes(filters.period)) filters.period = "";
+
+  const select = (key, label, options) => {
+    const el = h(
+      "select",
+      { onchange: (ev) => ((filters[key] = ev.target.value), renderLists()) },
+      options.map(([value, text]) => h("option", { value, selected: filters[key] === value }, text)),
+    );
+    return h("label", {}, h("span", {}, label), el);
+  };
+  const statuses = ["open", "escalated", "resolved", "explained"];
+
+  return h(
+    "div",
+    { class: "toolbar card", role: "group", "aria-label": "Filter and sort results" },
+    select("customer", "Customer", [["", "All customers"], ...customers.map((c) => [c, c])]),
+    select("period", "Period", [["", "All periods"], ...periods.map((p) => [p, p])]),
+    select("status", "Status", [["", "Any status"], ...statuses.map((s) => [s, STATUS_LABEL[s]])]),
+    select("sort", "Sort by", Object.entries(SORTS).map(([k, v]) => [k, v.label])),
+    h("button", { type: "button", class: "link", onclick: () => clearFilters(data) }, "Clear"),
+  );
+}
+
+function clearFilters(data) {
+  Object.assign(filters, { customer: "", period: "", status: "", sort: "customer" });
+  renderResults(data);
+}
+
+function renderLists() {
+  const data = current;
+  const all = data.invoices.flatMap((inv) => inv.findings);
+  const matches = (x) => (!filters.customer || x.customerId === filters.customer) && (!filters.period || x.period === filters.period);
+  const shown = all.filter((f) => matches(f) && (!filters.status || f.status === filters.status)).sort(SORTS[filters.sort].cmp);
+  const errors = shown.filter((f) => f.severity === "error");
+  const explained = shown.filter((f) => f.severity === "explained");
+  const filtered = filters.customer || filters.period || filters.status;
+  const invoices = data.invoices.filter(matches).sort(SORTS[filters.sort].cmp);
+  const openCount = errors.filter((f) => f.status === "open").length;
+
+  listsEl.replaceChildren(
+    filtered ? h("p", { class: "meta" }, `Showing ${shown.length} of ${all.length} findings.`) : null,
     errors.length
-      ? section("Needs review", `${errors.length} issue${errors.length === 1 ? "" : "s"}. Record a decision on each.`, errors.map(findingCard))
-      : section("Needs review", "", [h("p", { class: "no-action" }, "No errors found.")]),
+      ? section(
+          "Needs review",
+          openCount ? `${openCount} open. Record a decision on each.` : "All decided.",
+          errors.map(findingCard),
+        )
+      : section("Needs review", "", [h("p", { class: "no-action" }, filtered ? "No errors match these filters." : "No errors found.")]),
     explained.length ? section("Explained", "Looks different, but is correct.", explained.map(findingCard)) : null,
-    section("All invoices", "Totals include tax and approved credits.", [invoiceTable(data.invoices)]),
+    section("All invoices", "Totals include tax and approved credits.", [invoiceTable(invoices)]),
   );
 }
 
@@ -263,6 +338,8 @@ function decisionForm(f, badge) {
         method: "POST",
         body: JSON.stringify({ issueKey: f.id, status, note: note.value, analyst }),
       });
+      // Keep the in-memory result current so filters and sorting use the new status.
+      Object.assign(f, { status: issue.status, note: issue.note, decidedBy: issue.decidedBy, decidedAt: issue.decidedAt });
       showState(issue);
     } catch (e) {
       msg.textContent = e.message;
