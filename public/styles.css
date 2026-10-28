@@ -93,7 +93,8 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent-stron
 .tour { margin-top: 16px; padding: 14px 16px; }
 .tour-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .tour-head h2 { font-size: 15px; }
-.tour-head button { margin-left: auto; font-size: 14px; }
+.tour-actions { margin-left: auto; display: flex; gap: 14px; }
+.tour-head button { font-size: 14px; }
 .tour-steps { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 14px; }
 .tour-steps li { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; }
 .tour-steps .tick {

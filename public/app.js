@@ -143,6 +143,12 @@ function markTour(id) {
   renderTour();
 }
 
+function resetTour() {
+  tour = { done: [], hidden: false };
+  saveTour();
+  renderTour();
+}
+
 function setTourHidden(hidden) {
   tour.hidden = hidden;
   saveTour();
@@ -161,7 +167,12 @@ function renderTour() {
       { class: "tour-head" },
       h("h2", { id: "tour-title" }, "Try this"),
       h("span", { class: "meta" }, doneCount === TOUR_STEPS.length ? "All done. Thanks for trying it." : `${doneCount} of ${TOUR_STEPS.length} done`),
-      h("button", { type: "button", class: "link", onclick: () => setTourHidden(true) }, "Hide"),
+      h(
+        "span",
+        { class: "tour-actions" },
+        doneCount ? h("button", { type: "button", class: "link", onclick: resetTour }, "Start over") : null,
+        h("button", { type: "button", class: "link", onclick: () => setTourHidden(true) }, "Hide"),
+      ),
     ),
     h(
       "ol",
@@ -258,12 +269,14 @@ $("#upload-form").addEventListener("submit", async (ev) => {
 });
 
 $("#reset").addEventListener("click", async () => {
-  if (!confirm("Clear all decisions on the sample customers and restore the demo history?")) return;
+  if (!confirm("Clear all decisions on the sample customers, restore the demo history, and restart the Try this checklist?")) return;
   setBusy(true);
   try {
     await api("/api/demo/reset", { method: "POST", body: "{}" });
+    current = null;
     resultsEl.replaceChildren();
-    setStatus("Demo history reset. Click “Load sample data” to run it again.");
+    resetTour(); // a fresh demo starts with a fresh checklist
+    setStatus("Demo history and checklist reset. Click “Load sample data” to run it again.");
   } catch (e) {
     setStatus(e.message, { error: true });
   } finally {
