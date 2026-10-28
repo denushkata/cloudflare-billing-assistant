@@ -1,0 +1,3 @@
+credit_memo_id,customer_id,period,amount,reason,approved_by
+CM-2026-0119,C004,2026-09,4.02,"Tax correction: September invoice charged the CA rate instead of WA",m.chen
+CM-2026-0142,C007,2026-10,50.00,"SLA credit for a 4-hour outage on 2026-10-09",j.alvarez
