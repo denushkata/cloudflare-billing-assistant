@@ -184,6 +184,14 @@ describe("insights narrative", () => {
     expect(await narrateInsights(slow, facts(), 50)).toEqual({ status: "unavailable", note: "Summary unavailable: no reply within 0.05s." });
   });
 
+  it("says when the Workers AI daily allowance is used up", async () => {
+    const quota: AiRunner = { run: async () => { throw new Error("4006: you have used up your daily free allocation of 10,000 neurons"); } };
+    expect(await narrateInsights(quota, facts())).toEqual({
+      status: "unavailable",
+      note: "Summary unavailable: the Workers AI daily allowance is used up (it resets at 00:00 UTC).",
+    });
+  });
+
   it("compares numbers regardless of thousands separators", () => {
     expect(inventedNumbers("$1,206.56 across 12,500 units", '"$1206.56" "12500"')).toEqual([]);
   });

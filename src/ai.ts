@@ -97,8 +97,7 @@ async function explainOne(ai: AiRunner, finding: Finding, precedent: Precedent |
       ...(precedent && parsed.precedent_suggestion ? { precedentSuggestion: parsed.precedent_suggestion } : {}),
     };
   } catch (e) {
-    const msg = (e as Error).message;
-    return unavailable(msg === "timeout" ? `no reply within ${timeoutMs / 1000}s` : "the AI service returned an error");
+    return unavailable(aiErrorReason((e as Error).message, timeoutMs, "explanation"));
   } finally {
     clearTimeout(timer);
   }
@@ -224,9 +223,7 @@ export async function narrateInsights(ai: AiRunner, facts: Record<string, unknow
     if (containsLink(text) || hasHiddenChars(text)) return { status: "unavailable", note: "Summary unavailable: the reply contained a link or hidden characters." };
     return { status: "ok", text };
   } catch (e) {
-    const msg = (e as Error).message;
-    if (msg !== "timeout") console.error("insights narrative failed:", msg);
-    return { status: "unavailable", note: msg === "timeout" ? `Summary unavailable: no reply within ${timeoutMs / 1000}s.` : "Summary unavailable: the AI service returned an error." };
+    return { status: "unavailable", note: `Summary unavailable: ${aiErrorReason((e as Error).message, timeoutMs, "insights narrative")}.` };
   } finally {
     clearTimeout(timer);
   }
@@ -269,3 +266,14 @@ const monthName = (period: string) =>
   new Date(`${period}-15T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
 const unavailable = (reason: string): Explanation => ({ status: "unavailable", note: `Explanation unavailable: ${reason}.` });
+
+/**
+ * Turns a failed AI call into a reason a reviewer can act on. Workers AI reports
+ * a used-up daily allowance as error 4006; everything else stays generic.
+ */
+export function aiErrorReason(message: string, timeoutMs: number, what: string): string {
+  if (message === "timeout") return `no reply within ${timeoutMs / 1000}s`;
+  console.error(`${what} failed:`, message);
+  if (/\b4006\b|daily free allocation/i.test(message)) return "the Workers AI daily allowance is used up (it resets at 00:00 UTC)";
+  return "the AI service returned an error";
+}
