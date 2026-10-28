@@ -8,7 +8,7 @@ import sampleInvoices from "../sample-data/invoices.csv";
 import samplePlans from "../sample-data/plans.csv";
 import sampleUsage from "../sample-data/usage.csv";
 import { AI_TIMEOUT_MS, explainFindings, ISSUE_NAMES, MODEL, type AiRunner, type Explanation } from "./ai";
-import { DEMO_HISTORY } from "./demo";
+import { DEMO_HISTORY, PLANTED_CASES } from "./demo";
 import type { Decision, Issue, Ledger, Precedent } from "./ledger";
 import { parseInputs, type CsvFiles } from "./recon/model";
 import { ID_PATTERN } from "./safety";
@@ -157,11 +157,13 @@ async function handleReconcile(request: Request, env: AppEnv): Promise<Response>
     warnings,
     invoices: result.invoices.map((inv) => ({
       ...inv,
+      plantedCase: body.sample ? (PLANTED_CASES[inv.invoiceId] ?? null) : null,
       findings: inv.findings.map((f) => {
         const issue = stored.get(f.id);
         return {
           ...f,
           label: ISSUE_NAMES[f.type],
+          plantedCase: body.sample ? (PLANTED_CASES[f.invoiceId] ?? null) : null,
           ai: explanations.get(f.id),
           precedent: precedents[f.id] ?? null,
           status: issue?.status ?? (f.severity === "explained" ? "explained" : "open"),

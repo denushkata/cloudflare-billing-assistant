@@ -12,13 +12,22 @@
   <header class="site">
     <div class="wrap">
       <h1>Billing Reconciliation Assistant</h1>
-      <p class="tagline">Checks invoices against usage and plan terms. <strong>Code calculates, AI explains, you decide.</strong></p>
+      <p class="tagline">
+        Checks invoices against usage and plan terms. <strong>Code calculates, AI explains, you decide.</strong>
+        <button id="how-open" class="link" type="button">How it works</button>
+        <button id="tour-open" class="link" type="button" hidden>Show checklist</button>
+      </p>
     </div>
   </header>
 
   <main class="wrap">
     <section class="panel" aria-labelledby="run-heading">
       <h2 id="run-heading" class="sr-only">Run a check</h2>
+      <ol class="steps" aria-label="Three steps">
+        <li><span aria-hidden="true">1</span>Load sample data</li>
+        <li><span aria-hidden="true">2</span>Review what's flagged</li>
+        <li><span aria-hidden="true">3</span>Resolve one with a note</li>
+      </ol>
 
       <div class="demo">
         <div>
@@ -54,6 +63,7 @@
       </details>
     </section>
 
+    <aside id="tour" class="tour card" aria-labelledby="tour-title" hidden></aside>
     <div id="status" class="status" role="status" aria-live="polite" hidden></div>
     <div id="results"></div>
   </main>
@@ -64,6 +74,21 @@
       <button type="button" class="link" data-close>Close</button>
     </div>
     <div id="history-body"></div>
+  </dialog>
+
+  <dialog id="how" aria-labelledby="how-title">
+    <div class="dialog-head">
+      <h2 id="how-title">How it works</h2>
+      <button type="button" class="link" data-close>Close</button>
+    </div>
+    <ol class="flow">
+      <li><strong>Your data</strong><span>Usage, plans, invoices and credit memos as CSV, or the built-in sample.</span></li>
+      <li><strong>Code calculates</strong><span>Proration, overage, discounts, tax and credits, in exact cents. Every amount comes from here.</span></li>
+      <li><strong>AI explains</strong><span>Workers AI (Llama 3.3) explains each issue, a likely cause and a fix. It never does math; replies that add numbers or links are discarded.</span></li>
+      <li><strong>Memory</strong><span>A Durable Object per customer keeps every issue, decision and audit event. A repeat issue gets a “Seen before” suggestion.</span></li>
+      <li><strong>You decide</strong><span>Resolve or escalate, with a note. Resolutions are final and recorded with your name.</span></li>
+    </ol>
+    <p class="meta">Assignment requirements: LLM = Workers AI · coordination = the Worker and Durable Objects · user input = this page · memory = Durable Objects.</p>
   </dialog>
 
   <footer class="wrap site-foot">

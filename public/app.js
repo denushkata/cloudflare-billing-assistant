@@ -54,14 +54,144 @@ async function api(path, options = {}) {
 
 // ---------- analyst name (per-browser convenience only) ----------
 
+// A first-time visitor gets a suggested name so their first Resolve click just works.
+analystEl.value = "reviewer";
 try {
-  analystEl.value = localStorage.getItem("analyst") ?? "";
+  analystEl.value = localStorage.getItem("analyst") ?? "reviewer";
 } catch {}
 analystEl.addEventListener("change", () => {
   try {
     localStorage.setItem("analyst", analystEl.value.trim());
   } catch {}
 });
+
+// ---------- dialogs ----------
+
+for (const d of document.querySelectorAll("dialog")) {
+  d.querySelector("[data-close]").addEventListener("click", () => d.close());
+  d.addEventListener("click", (ev) => {
+    if (ev.target === d) d.close(); // click on the backdrop
+  });
+}
+$("#how-open").addEventListener("click", () => $("#how").showModal());
+
+// ---------- "Try this" checklist (ticks itself; progress kept in this browser only) ----------
+
+const TOUR_KEY = "tour.v1";
+const TOUR_STEPS = [
+  { id: "load", text: "Load the sample data", show: () => run({ sample: true }, "Sample data") },
+  {
+    id: "precedent",
+    text: "See the memory feature: C004's “Seen before” suggestion",
+    show: () => showCard("INV-2026-10-004:tax_wrong_state", ".block.precedent").then(() => markTour("precedent")),
+  },
+  { id: "decide", text: "Resolve or escalate an issue, with a note", show: () => showFirstOpen() },
+  { id: "history", text: "Open a customer's history to see the audit trail", show: () => withResults(() => openHistory("C004")) },
+];
+
+let tour = loadTour();
+
+function loadTour() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TOUR_KEY) ?? "{}");
+    return { done: Array.isArray(saved.done) ? saved.done : [], hidden: saved.hidden === true };
+  } catch {
+    return { done: [], hidden: false };
+  }
+}
+
+function saveTour() {
+  try {
+    localStorage.setItem(TOUR_KEY, JSON.stringify(tour));
+  } catch {}
+}
+
+function markTour(id) {
+  if (tour.done.includes(id)) return;
+  tour.done.push(id);
+  saveTour();
+  renderTour();
+}
+
+function setTourHidden(hidden) {
+  tour.hidden = hidden;
+  saveTour();
+  renderTour();
+}
+
+function renderTour() {
+  const el = $("#tour");
+  el.hidden = tour.hidden;
+  $("#tour-open").hidden = !tour.hidden;
+  if (tour.hidden) return;
+  const doneCount = TOUR_STEPS.filter((s) => tour.done.includes(s.id)).length;
+  el.replaceChildren(
+    h(
+      "div",
+      { class: "tour-head" },
+      h("h2", { id: "tour-title" }, "Try this"),
+      h("span", { class: "meta" }, doneCount === TOUR_STEPS.length ? "All done. Thanks for trying it." : `${doneCount} of ${TOUR_STEPS.length} done`),
+      h("button", { type: "button", class: "link", onclick: () => setTourHidden(true) }, "Hide"),
+    ),
+    h(
+      "ol",
+      { class: "tour-steps" },
+      TOUR_STEPS.map((s) => {
+        const done = tour.done.includes(s.id);
+        return h(
+          "li",
+          { class: done ? "done" : "" },
+          h("span", { class: "tick", "aria-hidden": "true" }, done ? "✓" : ""),
+          h("span", { class: "text" }, s.text, done ? h("span", { class: "sr-only" }, " (done)") : null),
+          done ? null : h("button", { type: "button", class: "link", onclick: s.show }, "Show me"),
+        );
+      }),
+    ),
+  );
+}
+
+$("#tour-open").addEventListener("click", () => setTourHidden(false));
+renderTour();
+
+/** Run the demo first if nothing is on screen yet. */
+async function withResults(fn) {
+  if (!current) await run({ sample: true }, "Sample data");
+  if (current) return fn();
+}
+
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function spotlight(el) {
+  el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
+  el.classList.add("spotlight");
+  setTimeout(() => el.classList.remove("spotlight"), 2500);
+}
+
+/** Bring a finding card into view, clearing filters or opening the Resolved list if they hide it. */
+function showCard(findingId, innerSelector) {
+  return withResults(() => {
+    let card = document.getElementById(`f-${findingId}`);
+    if (!card) {
+      clearFilters(current);
+      card = document.getElementById(`f-${findingId}`);
+    }
+    if (!card) return;
+    const details = card.closest("details");
+    if (details) details.open = true;
+    spotlight((innerSelector && card.querySelector(innerSelector)) || card);
+  });
+}
+
+function showFirstOpen() {
+  return withResults(() => {
+    const f = current.invoices.flatMap((inv) => inv.findings).find((x) => x.status === "open" || x.status === "escalated");
+    if (!f) {
+      setStatus("Every issue is decided. Use “Reset demo history” to start over.");
+      return;
+    }
+    showCard(f.id).then(() => document.getElementById(`f-${f.id}`)?.querySelector("textarea")?.focus({ preventScroll: true }));
+  });
+}
 
 // ---------- running a check ----------
 
@@ -137,7 +267,16 @@ function renderResults(data) {
     listsEl,
   );
   renderLists();
+  markTour("load");
 }
+
+// Tick "See the memory feature" once a "Seen before" block has actually been on screen.
+const precedentSeen = new IntersectionObserver(
+  (entries) => {
+    if (entries.some((e) => e.isIntersecting)) markTour("precedent");
+  },
+  { threshold: 0.6 },
+);
 
 // ---------- slicing and sorting (client-side view only) ----------
 
@@ -250,6 +389,8 @@ function renderLists() {
       section("All invoices", "Totals include tax and approved credits.", [invoiceTable(invoices)]),
     ].filter(Boolean),
   );
+  precedentSeen.disconnect();
+  listsEl.querySelectorAll(".block.precedent").forEach((el) => precedentSeen.observe(el));
 }
 
 /** An invoice the check flagged is "flagged" while any issue is open, then escalated, then resolved. */
@@ -289,6 +430,7 @@ function findingCard(f) {
       badge,
       h("h3", {}, capitalize(f.label)),
       h("span", { class: "where" }, "Customer ", customerButton(f.customerId), ` · ${f.invoiceId} · ${f.period}`),
+      f.plantedCase ? h("span", { class: "chip", title: f.plantedCase.title }, `Planted case ${f.plantedCase.number} of 8`) : null,
     ),
     h(
       "dl",
@@ -400,6 +542,7 @@ function decisionArea(f) {
           : `${capitalize(f.label)} on ${f.invoiceId} escalated. It stays in Needs review until resolved.`,
       );
       renderLists();
+      markTour("decide");
     } catch (e) {
       msg.textContent = `${capitalize(e.message)}${/[.!?]$/.test(e.message) ? "" : "."}`;
       button.disabled = false;
@@ -413,6 +556,7 @@ function decisionArea(f) {
 }
 
 function invoiceTable(invoices) {
+  const showCase = invoices.some((inv) => inv.plantedCase);
   return h(
     "div",
     { class: "card table-wrap" },
@@ -428,6 +572,7 @@ function invoiceTable(invoices) {
           h("th", {}, "Invoice"),
           h("th", {}, "Customer"),
           h("th", {}, "Status"),
+          showCase ? h("th", {}, "Planted case") : null,
           h("th", { class: "num" }, "Expected"),
           h("th", { class: "num" }, "Invoiced"),
           h("th", { class: "num" }, "Difference"),
@@ -443,6 +588,7 @@ function invoiceTable(invoices) {
             h("td", {}, inv.invoiceId),
             h("td", {}, customerButton(inv.customerId)),
             h("td", {}, h("span", { class: `badge ${inv.status}` }, STATUS_LABEL[inv.status])),
+            showCase ? h("td", { class: "case" }, inv.plantedCase ? `${inv.plantedCase.number}. ${inv.plantedCase.title}` : "") : null,
             h("td", { class: "num" }, money(inv.expectedTotalCents)),
             h("td", { class: "num" }, money(inv.invoicedTotalCents)),
             h("td", { class: "num" }, inv.differenceCents ? signed(inv.differenceCents) : "—"),
@@ -456,16 +602,13 @@ function invoiceTable(invoices) {
 // ---------- per-customer history ----------
 
 const dialog = $("#history");
-dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
-dialog.addEventListener("click", (ev) => {
-  if (ev.target === dialog) dialog.close();
-});
 
 async function openHistory(customerId) {
   const body = $("#history-body");
   $("#history-title").textContent = `History: ${customerId}`;
   body.replaceChildren(h("p", { class: "meta" }, "Loading…"));
   if (!dialog.open) dialog.showModal();
+  markTour("history");
   try {
     const { issues, events } = await api(`/api/customers/${encodeURIComponent(customerId)}/history`);
     const byKey = Object.fromEntries(issues.map((i) => [i.key, i]));

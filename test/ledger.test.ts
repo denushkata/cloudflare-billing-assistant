@@ -261,6 +261,23 @@ describe("persistence through the API", () => {
     expect(f.precedent.summary).toContain("Seen before in 2026-09");
   });
 
+  it("labels the eight planted cases on sample data only", async () => {
+    const sample = (await (await post(env(), "/api/reconcile", { sample: true })).json()) as any;
+    expect(findingsOf(sample).map((f: any) => [f.plantedCase.number, f.type])).toEqual([
+      [1, "proration_error"],
+      [2, "overage_on_total"],
+      [3, "discount_missing"],
+      [4, "tax_wrong_state"],
+      [5, "duplicate_line"],
+      [6, "timezone_boundary"],
+      [7, "credit_applied"],
+    ]);
+    expect(sample.invoices.filter((i: any) => i.plantedCase.number === 8).map((i: any) => i.status)).toEqual(["clean", "clean", "clean"]);
+    const uploaded = (await (await post(env(), "/api/reconcile", { files: { usage, invoices } })).json()) as any;
+    expect(uploaded.invoices.every((i: any) => i.plantedCase === null)).toBe(true);
+    expect(findingsOf(uploaded).every((f: any) => f.plantedCase === null)).toBe(true);
+  });
+
   it("never matches another customer's history", async () => {
     const e = env();
     await post(e, "/api/reconcile", { sample: true }); // seeds C004's September tax error

@@ -82,6 +82,42 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover:not(:disabled) { border-color: var(--accent-strong); }
 button.link { border: 0; background: none; padding: 0; color: var(--accent-strong); text-decoration: underline; }
 
+.tagline button.link { margin-left: 8px; font-size: 14px; }
+.steps { list-style: none; padding: 0; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 14px; }
+.steps li { display: flex; align-items: center; gap: 8px; }
+.steps span {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 12px;
+}
+
+.tour { margin-top: 16px; padding: 14px 16px; }
+.tour-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.tour-head h2 { font-size: 15px; }
+.tour-head button { margin-left: auto; font-size: 14px; }
+.tour-steps { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 14px; }
+.tour-steps li { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; }
+.tour-steps .tick {
+  width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+}
+.tour-steps li.done .tick { background: var(--ok-bg); color: var(--ok-ink); border-color: var(--ok-ink); }
+.tour-steps li.done .text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.tour-steps button.link { font-size: 14px; white-space: nowrap; }
+
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px dashed var(--accent-strong); color: var(--accent-strong); white-space: nowrap; }
+td.case { color: var(--muted); font-size: 13px; }
+.spotlight { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: var(--radius); transition: outline-color 0.3s; }
+
+.flow { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; counter-reset: flow; }
+.flow li { display: grid; gap: 2px; padding: 10px 12px 10px 44px; border: 1px solid var(--line); border-radius: 8px; position: relative; background: var(--bg); }
+.flow li::before {
+  counter-increment: flow; content: counter(flow); position: absolute; left: 12px; top: 10px;
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 12px;
+}
+.flow li + li::after { content: "↓"; position: absolute; top: -15px; left: 18px; color: var(--muted); font-size: 12px; }
+.flow span { color: var(--muted); font-size: 14px; }
+
 .demo { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; }
 .hint { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .links button.link { font-size: 14px; }
