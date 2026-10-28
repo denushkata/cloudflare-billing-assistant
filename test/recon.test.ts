@@ -1,19 +1,15 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import creditMemos from "../sample-data/credit_memos.csv";
+import invoices from "../sample-data/invoices.csv";
+import plans from "../sample-data/plans.csv";
+import usage from "../sample-data/usage.csv";
 import { parseCsv } from "../src/recon/csv";
 import { parseInputs, type ReconcileInput } from "../src/recon/model";
 import { parseCents, roundDiv } from "../src/recon/money";
 import { periodsFor } from "../src/recon/period";
 import { reconcile } from "../src/recon/reconcile";
 
-const read = (f: string) => readFileSync(new URL(`../sample-data/${f}`, import.meta.url), "utf8");
-const sample = (): ReconcileInput =>
-  parseInputs({
-    usage: read("usage.csv"),
-    plans: read("plans.csv"),
-    invoices: read("invoices.csv"),
-    creditMemos: read("credit_memos.csv"),
-  });
+const sample = (): ReconcileInput => parseInputs({ usage, plans, invoices, creditMemos });
 
 const run = (input = sample()) => reconcile(input);
 const invoice = (id: string, input?: ReconcileInput) => {
@@ -205,8 +201,7 @@ describe("helpers", () => {
   });
 
   it("names the file and line when a value is malformed", () => {
-    const files = { usage: read("usage.csv"), plans: read("plans.csv"), invoices: read("invoices.csv"), creditMemos: read("credit_memos.csv") };
-    files.invoices = files.invoices.replace("200.00,12.50", "200.00,abc");
+    const files = { usage, plans, creditMemos, invoices: invoices.replace("200.00,12.50", "200.00,abc") };
     expect(() => parseInputs(files)).toThrow('invoices.csv line 2: tax: "abc" is not a number');
   });
 });
