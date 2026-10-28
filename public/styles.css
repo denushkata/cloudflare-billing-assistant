@@ -121,7 +121,10 @@ td.case { color: var(--muted); font-size: 13px; }
 .demo { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; }
 .hint { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .links button.link { font-size: 14px; }
-.analyst { display: grid; gap: 4px; font-size: 14px; min-width: 220px; }
+.analyst { display: grid; gap: 4px; font-size: 14px; min-width: 220px; max-width: 280px; }
+.field-hint { margin: 0; font-size: 12px; color: var(--muted); }
+.field-hint.error { color: var(--error-ink); }
+input[aria-invalid="true"] { border-color: var(--error-ink); }
 input[type="text"], textarea {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%;
 }

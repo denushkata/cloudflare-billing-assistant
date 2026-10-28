@@ -43,10 +43,11 @@
             <button id="reset" class="link" type="button">Reset demo history</button>
           </p>
         </div>
-        <label class="analyst">
-          <span>Your name <small>(recorded on decisions)</small></span>
-          <input id="analyst" type="text" autocomplete="name" maxlength="100" placeholder="e.g. j.smith">
-        </label>
+        <div class="analyst">
+          <label for="analyst">Your name <small>(recorded on decisions)</small></label>
+          <input id="analyst" type="text" autocomplete="name" maxlength="100" required aria-describedby="analyst-hint">
+          <p id="analyst-hint" class="field-hint">In production this comes from your sign-in, not a typed name.</p>
+        </div>
       </div>
 
       <details class="upload">

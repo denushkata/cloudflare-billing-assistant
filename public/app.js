@@ -54,15 +54,45 @@ async function api(path, options = {}) {
 
 // ---------- analyst name (per-browser convenience only) ----------
 
-// A first-time visitor gets a suggested name so their first Resolve click just works.
-analystEl.value = "reviewer";
+// The name is never blank: a first-time visitor gets "reviewer", and an empty or invalid
+// edit snaps back to the last valid name. Same rule as the server (src/safety.ts).
+// In production the name would come from the signed-in identity instead.
+const NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}0-9 .'_-]{0,99}$/u;
+const NAME_HINT = "In production this comes from your sign-in, not a typed name.";
+const analystHint = $("#analyst-hint");
+let analystName = "reviewer";
 try {
-  analystEl.value = localStorage.getItem("analyst") ?? "reviewer";
+  const saved = localStorage.getItem("analyst");
+  if (saved && NAME_PATTERN.test(saved)) analystName = saved;
 } catch {}
+analystEl.value = analystName;
+
+function setNameHint(text, error) {
+  analystHint.textContent = text;
+  analystHint.classList.toggle("error", error);
+  analystEl.setAttribute("aria-invalid", String(error));
+}
+
+analystEl.addEventListener("input", () => {
+  const v = analystEl.value.trim();
+  if (!v) setNameHint("Your name can't be blank; it goes in the audit trail.", true);
+  else if (!NAME_PATTERN.test(v)) setNameHint("Use letters, digits, spaces and . ' _ - only.", true);
+  else setNameHint(NAME_HINT, false);
+});
+
 analystEl.addEventListener("change", () => {
-  try {
-    localStorage.setItem("analyst", analystEl.value.trim());
-  } catch {}
+  const v = analystEl.value.trim();
+  if (NAME_PATTERN.test(v)) {
+    analystName = v;
+    analystEl.value = v;
+    setNameHint(NAME_HINT, false);
+    try {
+      localStorage.setItem("analyst", v);
+    } catch {}
+  } else {
+    analystEl.value = analystName;
+    setNameHint(`${v ? "That name isn't allowed" : "Your name can't be blank"}, so it's back to “${analystName}”.`, true);
+  }
 });
 
 // ---------- dialogs ----------
@@ -516,12 +546,7 @@ function decisionArea(f) {
 
   const decide = async (status, button) => {
     msg.textContent = "";
-    const analyst = analystEl.value.trim();
-    if (!analyst) {
-      msg.textContent = "Enter your name at the top of the page first; it goes in the audit trail.";
-      analystEl.focus();
-      return;
-    }
+    const analyst = analystName; // always a valid, non-blank name
     if (!note.value.trim()) {
       msg.textContent =
         status === "resolved" ? "Add a note before you resolve: what was done to fix it." : "Add a note before you escalate: why it needs escalating.";
