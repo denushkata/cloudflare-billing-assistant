@@ -15,6 +15,7 @@ function h(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v === false || v == null) continue;
     if (k === "class") el.className = v;
+    else if (k === "style") Object.assign(el.style, v); // CSSOM, which the strict CSP allows (style attributes it would block)
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? "" : v);
   }
@@ -306,11 +307,188 @@ function renderResults(data) {
       ),
       data.warnings.map((w) => h("p", { class: "warn" }, w)),
     ),
+    insightsEl,
     toolbar(data),
     listsEl,
   );
   renderLists();
   markTour("load");
+  loadInsights(data, { narrative: true });
+}
+
+// ---------- insights (all numbers come from /api/insights; the model only writes the summary) ----------
+
+const insightsEl = h("details", { class: "insights", open: true });
+let insightsRequest = 0;
+
+function insightScope(data) {
+  return {
+    period: [...data.period].sort().pop(),
+    customers: [...new Set(data.invoices.map((i) => i.customerId))],
+  };
+}
+
+async function loadInsights(data, { narrative = false } = {}) {
+  const request = ++insightsRequest;
+  const { period, customers } = insightScope(data);
+  if (!insightsEl.childElementCount) insightsEl.replaceChildren(insightsHead(period), h("p", { class: "meta" }, "Loading insights…"));
+  try {
+    const { insights, warnings } = await api(`/api/insights?period=${encodeURIComponent(period)}&customers=${customers.map(encodeURIComponent).join(",")}`);
+    if (request !== insightsRequest) return; // a newer refresh already rendered
+    insightsEl.dataset.summary = insights.summary;
+    const narrativeEl = insightsEl.querySelector(".narrative") ?? narrativeBlock(insights.summary, null);
+    insightsEl.replaceChildren(
+      insightsHead(period),
+      narrativeEl,
+      warnings.map((w) => h("p", { class: "warn" }, w)),
+      h("div", { class: "insight-grid" }, exposureCard(insights), rootCauseCard(insights), agingCard(insights), hotspotCard(insights)),
+    );
+    if (narrative) loadNarrative(data);
+  } catch (e) {
+    insightsEl.replaceChildren(insightsHead(period), h("p", { class: "warn" }, `Insights unavailable: ${e.message}`));
+  }
+}
+
+async function loadNarrative(data) {
+  const scope = insightScope(data);
+  const current = insightsEl.querySelector(".narrative");
+  if (current) current.replaceWith(narrativeBlock(null, null, true));
+  let result;
+  try {
+    ({ narrative: result } = await api("/api/insights/narrative", { method: "POST", body: JSON.stringify(scope) }));
+  } catch (e) {
+    result = { status: "unavailable", note: `Summary unavailable: ${e.message}` };
+  }
+  const fallback = insightsEl.dataset.summary ?? "";
+  insightsEl.querySelector(".narrative")?.replaceWith(narrativeBlock(fallback, result));
+}
+
+function insightsHead(period) {
+  return h("summary", {}, h("h2", {}, "Insights"), h("span", { class: "meta" }, `Period ${period} · issue amounts as shown on each card`));
+}
+
+/** AI summary when available; otherwise the code-written summary with a short note. */
+function narrativeBlock(fallback, result, loading = false) {
+  if (fallback != null) insightsEl.dataset.summary = fallback;
+  const refresh = h("button", { type: "button", class: "link", onclick: () => current && loadNarrative(current) }, "Refresh summary");
+  if (loading) return h("div", { class: "block ai narrative" }, h("span", { class: "tag" }, "AI summary"), h("p", { class: "meta" }, "Writing a summary with Workers AI…"));
+  if (result?.status === "ok") {
+    return h("div", { class: "block ai narrative" }, h("span", { class: "tag" }, "AI summary · from the metrics below"), h("p", {}, result.text), h("p", { class: "source" }, refresh));
+  }
+  return h(
+    "div",
+    { class: "block ai narrative" },
+    h("span", { class: "tag" }, "Summary"),
+    h("p", {}, insightsEl.dataset.summary ?? ""),
+    result ? h("p", { class: "unavailable" }, result.note, " ", refresh) : null,
+  );
+}
+
+const STATUS_PARTS = [
+  ["open", "Open"],
+  ["escalated", "Escalated"],
+  ["resolved", "Resolved"],
+];
+
+/** A stacked bar of open / escalated / resolved amounts, labelled in text so color is never the only cue. */
+function statusBar(label, sub, side) {
+  const segments = STATUS_PARTS.filter(([k]) => side[k] > 0).map(([k, name]) =>
+    h("span", { class: `seg ${k}`, style: { flexGrow: String(side[k]) }, title: `${name}: ${money(side[k])}` }),
+  );
+  return h(
+    "div",
+    { class: "exposure-row" },
+    h("div", { class: "row-head" }, h("span", {}, h("strong", {}, label), h("small", {}, ` · ${sub}`)), h("strong", { class: "num" }, money(side.total))),
+    side.total ? h("div", { class: "stack", role: "img", "aria-label": `${label}: ${STATUS_PARTS.map(([k, n]) => `${n} ${money(side[k])}`).join(", ")}` }, segments) : h("div", { class: "stack empty" }),
+    h(
+      "p",
+      { class: "legend" },
+      STATUS_PARTS.map(([k, name]) => h("span", {}, h("i", { class: `swatch ${k}`, "aria-hidden": "true" }), `${name} ${money(side[k])}`)),
+    ),
+  );
+}
+
+function exposureCard(x) {
+  return h(
+    "section",
+    { class: "card insight" },
+    h("h3", {}, "Exposure"),
+    statusBar("Overcharged", "refund exposure", x.exposure.overchargedCents),
+    statusBar("Undercharged", "revenue leakage", x.exposure.underchargedCents),
+  );
+}
+
+function rootCauseCard(x) {
+  const max = Math.max(1, ...x.rootCauses.map((r) => r.totalCents));
+  return h(
+    "section",
+    { class: "card insight" },
+    h("h3", {}, "Root causes"),
+    x.rootCauses.length
+      ? h(
+          "ol",
+          { class: "bars" },
+          x.rootCauses.map((r) =>
+            h(
+              "li",
+              { title: `${capitalize(r.label)}: ${r.count} issue${r.count === 1 ? "" : "s"}, ${money(r.totalCents)}` },
+              h("span", { class: "bar-label" }, capitalize(r.label)),
+              h("span", { class: "bar-track" }, h("span", { class: "bar", style: { width: `${Math.max(2, (r.totalCents / max) * 100)}%` } })),
+              h("span", { class: "num" }, money(r.totalCents)),
+            ),
+          ),
+        )
+      : h("p", { class: "meta" }, "No errors this period."),
+  );
+}
+
+function agingCard(x) {
+  const o = x.aging.oldest;
+  return h(
+    "section",
+    { class: "card insight" },
+    h("h3", {}, "Aging and recurrence"),
+    h(
+      "dl",
+      { class: "facts" },
+      x.aging.buckets.flatMap((b) => [h("dt", {}, `Open or escalated, ${b.label}`), h("dd", { class: "num" }, b.count)]),
+      h("dt", {}, "Oldest open"),
+      h("dd", {}, o ? [customerButton(o.customerId), ` ${o.ageDays} day${o.ageDays === 1 ? "" : "s"}, ${STATUS_LABEL[o.status].toLowerCase()}`] : "None"),
+      h("dt", {}, "Repeats of an earlier decided issue"),
+      h("dd", { class: "num" }, `${x.recurrence.repeats} of ${x.recurrence.of} (${x.recurrence.percent}%)`),
+      h("dt", {}, "Median time to resolve"),
+      h("dd", { class: "num" }, x.medianHoursToResolve == null ? "None resolved yet" : x.medianHoursToResolve < 1 ? "Under 1 h" : `${x.medianHoursToResolve} h`),
+    ),
+  );
+}
+
+function hotspotCard(x) {
+  return h(
+    "section",
+    { class: "card insight" },
+    h("h3", {}, "Customer hotspots"),
+    x.hotspots.length
+      ? h(
+          "table",
+          { class: "compact" },
+          h("thead", {}, h("tr", {}, h("th", {}, "Customer"), h("th", { class: "num" }, "Open amount"), h("th", { class: "num" }, "Open issues"), h("th", {}, ""))),
+          h(
+            "tbody",
+            {},
+            x.hotspots.map((c) =>
+              h(
+                "tr",
+                {},
+                h("td", {}, customerButton(c.customerId)),
+                h("td", { class: "num" }, money(c.openCents)),
+                h("td", { class: "num" }, `${c.open} of ${c.issues}`),
+                h("td", {}, c.repeats ? h("span", { class: "badge escalated" }, "Repeat") : ""),
+              ),
+            ),
+          ),
+        )
+      : h("p", { class: "meta" }, "No open issues."),
+  );
 }
 
 // Tick "See persistence at work" once a "Seen before" block has actually been on screen.
@@ -581,6 +759,7 @@ function decisionArea(f) {
       );
       renderLists();
       markTour("decide");
+      loadInsights(current); // metrics only; the summary keeps its "Refresh" link
     } catch (e) {
       msg.textContent = `${capitalize(e.message)}${/[.!?]$/.test(e.message) ? "" : "."}`;
       button.disabled = false;

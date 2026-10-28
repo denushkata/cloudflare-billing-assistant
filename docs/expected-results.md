@@ -66,6 +66,25 @@ As a result, a missing discount does not also produce a tax finding, and an over
 
 Duplicates are removed before the other checks. The duplicate finding carries the full extra charge, including tax.
 
+## Insights on a fresh demo run
+
+These are computed in code from the customers' ledgers, using the issue amounts shown on each card. Asserted in `test/insights.test.ts`.
+
+| Metric | Expected |
+|---|---|
+| Issues in 2026-10 | 6 (case 7 is explained, not an issue) |
+| Overcharged (refund exposure) | $610.91, all open: $500.00 + $75.00 + $31.80 + $4.11 |
+| Undercharged (revenue leakage) | $174.84, all open: $154.84 + $20.00 |
+| Root causes, largest first | Overage on total usage $500.00 · proration $154.84 · missing discount $75.00 · duplicate line $31.80 · time zone period $20.00 · wrong-state tax $4.11 |
+| Repeats of an earlier decided issue | 1 of 6 (17%): C004's wrong-state sales tax, decided in September |
+| Customer hotspots by open amount | C002, C001, C003, C005, C006, C004 (C004 marked as a repeat) |
+| Aging of open or escalated issues | All 6 in 0–2 days |
+| Median time to resolve | None resolved yet |
+
+Resolving C002's issue and escalating C001's moves $500.00 to resolved and $154.84 to escalated, and removes C002 from the hotspots.
+
+The AI summary may only repeat numbers from these metrics. A reply with any other number is discarded, and the code-written summary is shown instead.
+
 ## For the persistence step
 
 The C004 tax case gets a seeded history entry: in September 2026 the same CA-instead-of-WA error was resolved with a credit (memo CM-2026-0119, already in `credit_memos.csv`). This lets the demo show the "same issue as before" suggestion on the first click.

@@ -7,7 +7,8 @@ import sampleCreditMemos from "../sample-data/credit_memos.csv";
 import sampleInvoices from "../sample-data/invoices.csv";
 import samplePlans from "../sample-data/plans.csv";
 import sampleUsage from "../sample-data/usage.csv";
-import { AI_TIMEOUT_MS, explainFindings, ISSUE_NAMES, MODEL, type AiRunner, type Explanation } from "./ai";
+import { AI_TIMEOUT_MS, explainFindings, ISSUE_NAMES, MODEL, narrateInsights, type AiRunner, type Explanation } from "./ai";
+import { computeInsights, insightFacts, type InsightIssue } from "./insights";
 import { DEMO_HISTORY, PLANTED_CASES } from "./demo";
 import type { Decision, Issue, Ledger, Precedent } from "./ledger";
 import { parseInputs, type CsvFiles } from "./recon/model";
@@ -48,6 +49,8 @@ export default {
       if (history && request.method === "GET") return await handleHistory(safeDecode(history[1]!), env);
       if (decision && request.method === "POST") return await handleDecision(safeDecode(decision[1]!), request, env);
       if (pathname === "/api/demo/reset" && request.method === "POST") return await handleDemoReset(env);
+      if (pathname === "/api/insights" && request.method === "GET") return await handleInsights(url.searchParams, env);
+      if (pathname === "/api/insights/narrative" && request.method === "POST") return await handleNarrative(request, env);
       if (sampleFile && request.method === "GET") return sampleCsv(sampleFile[1]!);
       return json({ error: "Not found" }, 404);
     } catch (e) {
@@ -196,6 +199,47 @@ async function handleDecision(customerId: string, request: Request, env: AppEnv)
     new Date().toISOString(),
   );
   return out.error ? json({ error: out.error }, 400) : json({ issue: out.issue });
+}
+
+const MAX_INSIGHT_CUSTOMERS = 500;
+
+/** Read the named customers' ledgers and compute insights for `period`. Unreadable ledgers become warnings. */
+async function loadInsights(customers: unknown, period: unknown, env: AppEnv) {
+  if (typeof period !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return { error: "period must look like 2026-10" };
+  const ids = Array.isArray(customers) ? customers : [];
+  if (!ids.length || ids.length > MAX_INSIGHT_CUSTOMERS || !ids.every((c) => typeof c === "string" && CUSTOMER_ID.test(c))) {
+    return { error: `customers must be 1-${MAX_INSIGHT_CUSTOMERS} valid customer IDs` };
+  }
+  const warnings: string[] = [];
+  const issues: InsightIssue[] = [];
+  await Promise.all(
+    [...new Set(ids as string[])].map(async (customerId) => {
+      try {
+        const { issues: own } = await ledger(env, customerId).history();
+        issues.push(...own.map((i) => ({ ...i, customerId })));
+      } catch (e) {
+        console.error(e);
+        warnings.push(`History for ${customerId} could not be read.`);
+      }
+    }),
+  );
+  return { insights: computeInsights(issues, period, new Date().toISOString()), warnings };
+}
+
+/** GET /api/insights?period=2026-10&customers=C001,C002 — metrics only, computed in code. */
+async function handleInsights(params: URLSearchParams, env: AppEnv): Promise<Response> {
+  const out = await loadInsights((params.get("customers") ?? "").split(",").filter(Boolean), params.get("period"), env);
+  return "error" in out ? json({ error: out.error }, 400) : json(out);
+}
+
+/** POST { period, customers } — the same metrics, described in two or three sentences by the model. */
+async function handleNarrative(request: Request, env: AppEnv): Promise<Response> {
+  const body = await readJson<{ period?: unknown; customers?: unknown }>(request);
+  if (!body) return json({ error: "Request body must be JSON." }, 400);
+  const out = await loadInsights(body.customers, body.period, env);
+  if ("error" in out) return json({ error: out.error }, 400);
+  if (!out.insights.issues) return json({ narrative: { status: "ok", text: out.insights.summary } });
+  return json({ narrative: await narrateInsights(env.AI, insightFacts(out.insights)) });
 }
 
 /** Clears the sample customers' ledgers and restores the seeded history, so every reviewer can start fresh. */

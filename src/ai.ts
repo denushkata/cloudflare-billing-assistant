@@ -174,6 +174,72 @@ function parseReply(reply: unknown) {
   return parsed;
 }
 
+// ---------- portfolio insights narrative ----------
+
+const INSIGHTS_PROMPT = `You summarize billing reconciliation metrics for a billing leader.
+Code has computed every metric; they are correct.
+Write 2 or 3 plain sentences, at most 60 words in total:
+1. The overcharged and undercharged totals, with their amounts.
+2. The largest root cause, with its amount, as the billing-system problem to fix first.
+3. If any issue repeats an earlier decided one, name the customer and say the earlier fix did not hold.
+Shape (placeholders, not real values): "Customers were overcharged <amount> and undercharged <amount>. Fix <largest root cause> first (<amount>). <Customer>'s <issue> has recurred, so last time's fix did not hold."
+Use only numbers that appear in the facts, exactly as written. Never calculate, round, add or compare numbers yourself.
+No links, no lists, no headings.`;
+
+const NARRATIVE_SCHEMA = { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] };
+
+export type Narrative = { status: "ok"; text: string } | { status: "unavailable"; note: string };
+
+/** Two or three sentences about computed insights. Never throws. */
+export async function narrateInsights(ai: AiRunner, facts: Record<string, unknown>, timeoutMs = AI_TIMEOUT_MS): Promise<Narrative> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    });
+    const reply = await Promise.race([
+      ai.run(MODEL, {
+        messages: [
+          { role: "system", content: INSIGHTS_PROMPT },
+          { role: "user", content: JSON.stringify(facts, null, 2) },
+        ],
+        response_format: { type: "json_schema", json_schema: NARRATIVE_SCHEMA },
+        max_tokens: 400,
+        temperature: 0.2,
+      }),
+      timeout,
+    ]);
+    let body = (reply as { response?: unknown })?.response;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        return { status: "unavailable", note: "Summary unavailable: the model returned an unreadable reply." };
+      }
+    }
+    const text = typeof (body as { summary?: unknown })?.summary === "string" ? (body as { summary: string }).summary.trim() : "";
+    if (!text) return { status: "unavailable", note: "Summary unavailable: the model returned an unreadable reply." };
+    const invented = inventedNumbers(text, JSON.stringify(facts));
+    if (invented.length) return { status: "unavailable", note: `Summary unavailable: the model introduced numbers not in the metrics (${invented.join(", ")}).` };
+    if (containsLink(text) || hasHiddenChars(text)) return { status: "unavailable", note: "Summary unavailable: the reply contained a link or hidden characters." };
+    return { status: "ok", text };
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg !== "timeout") console.error("insights narrative failed:", msg);
+    return { status: "unavailable", note: msg === "timeout" ? `Summary unavailable: no reply within ${timeoutMs / 1000}s.` : "Summary unavailable: the AI service returned an error." };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Stricter than inventedAmounts: every number in `text` (counts, amounts, percentages, days) must appear in `facts`. */
+export function inventedNumbers(text: string, facts: string): string[] {
+  const norm = (s: string) => s.replace(/,/g, "").replace(/\.0+$/, "");
+  const pattern = /\d[\d,]*(?:\.\d+)?/g;
+  const allowed = new Set((facts.match(pattern) ?? []).map(norm));
+  return [...new Set((text.match(pattern) ?? []).filter((m) => !allowed.has(norm(m))))];
+}
+
 /** Dollar amounts and percentages in `text` that do not appear in `facts`. Sign and "$" placement are ignored. */
 export function inventedAmounts(text: string, facts: string): string[] {
   const norm = (s: string) => s.replace(/[$,\s-]/g, "").replace(/\.00$/, "");
