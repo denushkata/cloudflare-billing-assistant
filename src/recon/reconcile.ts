@@ -199,7 +199,7 @@ function reconcileInvoice(lines: InvoiceLine[], input: ReconcileInput): InvoiceR
         type === "overage_on_total"
           ? `Overage was charged on all ${units(billingQty)} units instead of the ${units(expectedOverQty)} units above the ${units(plan.includedQuantity)} included.`
           : type === "timezone_boundary"
-            ? `Usage was assigned to months by the UTC calendar instead of the billing time zone (${BILLING_TIME_ZONE}); ${boundaryRecords.length} record(s) near midnight landed in the wrong period.`
+            ? `Usage was assigned to months by the UTC calendar instead of the billing time zone (${BILLING_TIME_ZONE}); ${boundaryRecords.length === 1 ? "1 usage record" : `${boundaryRecords.length} usage records`} near midnight landed in the wrong period.`
             : `Overage is ${units(invoicedOverQty)} units for ${formatCents(invoicedOver)}; usage gives ${units(expectedOverQty)} units for ${formatCents(expectedOver)}.`,
       facts: {
         usage_in_period: billingQty,

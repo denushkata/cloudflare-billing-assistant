@@ -7,7 +7,7 @@ import sampleCreditMemos from "../sample-data/credit_memos.csv";
 import sampleInvoices from "../sample-data/invoices.csv";
 import samplePlans from "../sample-data/plans.csv";
 import sampleUsage from "../sample-data/usage.csv";
-import { AI_TIMEOUT_MS, explainFindings, MODEL, type AiRunner, type Explanation } from "./ai";
+import { AI_TIMEOUT_MS, explainFindings, ISSUE_NAMES, MODEL, type AiRunner, type Explanation } from "./ai";
 import { DEMO_HISTORY } from "./demo";
 import type { Decision, Issue, Ledger, Precedent } from "./ledger";
 import { parseInputs, type CsvFiles } from "./recon/model";
@@ -34,11 +34,13 @@ export default {
     const { pathname } = new URL(request.url);
     const history = /^\/api\/customers\/([^/]+)\/history$/.exec(pathname);
     const decision = /^\/api\/customers\/([^/]+)\/decisions$/.exec(pathname);
+    const sampleFile = /^\/api\/sample\/([a-z_]+\.csv)$/.exec(pathname);
     try {
       if (pathname === "/api/reconcile" && request.method === "POST") return await handleReconcile(request, env);
       if (history && request.method === "GET") return await handleHistory(decodeURIComponent(history[1]!), env);
       if (decision && request.method === "POST") return await handleDecision(decodeURIComponent(decision[1]!), request, env);
       if (pathname === "/api/demo/reset" && request.method === "POST") return await handleDemoReset(env);
+      if (sampleFile && request.method === "GET") return sampleCsv(sampleFile[1]!);
       return json({ error: "Not found" }, 404);
     } catch (e) {
       console.error(e);
@@ -124,6 +126,7 @@ async function handleReconcile(request: Request, env: AppEnv): Promise<Response>
         const issue = stored.get(f.id);
         return {
           ...f,
+          label: ISSUE_NAMES[f.type],
           ai: explanations.get(f.id),
           precedent: precedents[f.id] ?? null,
           status: issue?.status ?? (f.severity === "explained" ? "explained" : "open"),
@@ -139,7 +142,8 @@ async function handleReconcile(request: Request, env: AppEnv): Promise<Response>
 
 async function handleHistory(customerId: string, env: AppEnv): Promise<Response> {
   if (!CUSTOMER_ID.test(customerId)) return json({ error: "Invalid customer ID." }, 400);
-  return json({ customerId, ...(await ledger(env, customerId).history()) });
+  const { issues, events } = await ledger(env, customerId).history();
+  return json({ customerId, issues: issues.map((i) => ({ ...i, label: ISSUE_NAMES[i.type] })), events });
 }
 
 /** Body: { issueKey, status: "resolved" | "escalated", note, analyst } */
@@ -167,6 +171,22 @@ async function handleDemoReset(env: AppEnv): Promise<Response> {
     }),
   );
   return json({ reset: SAMPLE_CUSTOMERS });
+}
+
+const SAMPLE_FILES: Record<string, string> = {
+  "usage.csv": sampleUsage,
+  "plans.csv": samplePlans,
+  "invoices.csv": sampleInvoices,
+  "credit_memos.csv": sampleCreditMemos,
+};
+
+/** Lets reviewers download the exact files the demo uses. */
+function sampleCsv(name: string): Response {
+  const body = SAMPLE_FILES[name];
+  if (!body) return json({ error: "Not found" }, 404);
+  return new Response(body, {
+    headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${name}"` },
+  });
 }
 
 function explanationText(e: Explanation | undefined): string | null {

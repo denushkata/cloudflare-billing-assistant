@@ -1,5 +1,75 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Billing Reconciliation Assistant</title></head>
-<body><p>Front end coming in a later step. API: <code>POST /api/reconcile</code> with <code>{"sample": true}</code>.</p></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Billing Reconciliation Assistant</title>
+  <meta name="description" content="Checks invoices against usage and plan terms. Code calculates, AI explains, analysts decide.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f38020'/%3E%3Cpath d='M9 17l5 5 9-11' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <h1>Billing Reconciliation Assistant</h1>
+      <p class="tagline">Checks invoices against usage and plan terms. <strong>Code calculates, AI explains, you decide.</strong></p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="run-heading">
+      <h2 id="run-heading" class="sr-only">Run a check</h2>
+
+      <div class="demo">
+        <div>
+          <button id="demo" class="primary" type="button">Load sample data</button>
+          <p class="hint">Runs the built-in October 2026 demo: 10 invoices with 8 planted cases. No files needed.</p>
+          <p class="hint links">
+            Sample files:
+            <a href="/api/sample/usage.csv">usage</a> ·
+            <a href="/api/sample/plans.csv">plans</a> ·
+            <a href="/api/sample/invoices.csv">invoices</a> ·
+            <a href="/api/sample/credit_memos.csv">credit memos</a>
+            <span aria-hidden="true">·</span>
+            <button id="reset" class="link" type="button">Reset demo history</button>
+          </p>
+        </div>
+        <label class="analyst">
+          <span>Your name <small>(recorded on decisions)</small></span>
+          <input id="analyst" type="text" autocomplete="name" maxlength="100" placeholder="e.g. j.smith">
+        </label>
+      </div>
+
+      <details class="upload">
+        <summary>Or upload your own CSV files</summary>
+        <form id="upload-form">
+          <div class="files">
+            <label>usage.csv <small>required</small><input type="file" name="usage" accept=".csv,text/csv"></label>
+            <label>invoices.csv <small>required</small><input type="file" name="invoices" accept=".csv,text/csv"></label>
+            <label>plans.csv <small>optional, defaults to sample</small><input type="file" name="plans" accept=".csv,text/csv"></label>
+            <label>credit_memos.csv <small>optional, defaults to sample</small><input type="file" name="creditMemos" accept=".csv,text/csv"></label>
+          </div>
+          <button id="check" type="submit">Check</button>
+        </form>
+      </details>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+    <div id="results"></div>
+  </main>
+
+  <dialog id="history" aria-labelledby="history-title">
+    <div class="dialog-head">
+      <h2 id="history-title">History</h2>
+      <button type="button" class="link" data-close>Close</button>
+    </div>
+    <div id="history-body"></div>
+  </dialog>
+
+  <footer class="wrap site-foot">
+    Runs on Cloudflare Workers, Workers AI and Durable Objects. Amounts are computed in code; the model only writes explanations.
+  </footer>
+
+  <script src="app.js" type="module"></script>
+</body>
 </html>

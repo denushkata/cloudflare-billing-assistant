@@ -169,7 +169,7 @@ export function inventedAmounts(text: string, facts: string): string[] {
   return [...new Set((text.match(pattern) ?? []).filter((m) => !allowed.has(norm(m))))];
 }
 
-const ISSUE_NAMES: Record<Finding["type"], string> = {
+export const ISSUE_NAMES: Record<Finding["type"], string> = {
   missing_plan: "missing plan terms",
   duplicate_line: "duplicate invoice line",
   proration_error: "proration error",
