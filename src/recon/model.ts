@@ -2,6 +2,7 @@ import { parseCsv, type CsvRow } from "./csv";
 import { parseBasisPoints, parseCents, parseMicros, parseWholeNumber } from "./money";
 import { assertPeriod, periodsFor } from "./period";
 import { STATE_TAX_BP } from "./tax";
+import { safeAnalystName, safeId, safeText } from "../safety";
 
 export interface UsageRecord {
   customerId: string;
@@ -69,9 +70,9 @@ export function parseInputs(files: CsvFiles): ReconcileInput {
     usage: rows(files.usage, "usage.csv", ["customer_id", "timestamp", "product", "quantity"], (r) => {
       const periods = periodsFor(r.timestamp!);
       return {
-        customerId: required(r, "customer_id"),
+        customerId: id(r, "customer_id"),
         timestamp: r.timestamp!,
-        product: r.product!,
+        product: id(r, "product"),
         quantity: parseWholeNumber(r.quantity!, "quantity"),
         billingPeriod: periods.billing,
         utcPeriod: periods.utc,
@@ -87,8 +88,8 @@ export function parseInputs(files: CsvFiles): ReconcileInput {
         if (!(taxState in STATE_TAX_BP)) throw new Error(`tax_state "${r.tax_state}" has no rate in the tax table`);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(r.effective_date!)) throw new Error(`effective_date "${r.effective_date}" must be YYYY-MM-DD`);
         return {
-          customerId: required(r, "customer_id"),
-          plan: required(r, "plan"),
+          customerId: id(r, "customer_id"),
+          plan: safeText(r.plan, "plan", { max: 64, required: true }),
           priceCents: parseCents(r.price!, "price"),
           includedQuantity: parseWholeNumber(r.included_quantity!, "included_quantity"),
           overageRateMicros: parseMicros(r.overage_rate!, "overage_rate"),
@@ -107,15 +108,15 @@ export function parseInputs(files: CsvFiles): ReconcileInput {
         const lineItem = r.line_item!.toLowerCase() as LineItem;
         if (!LINE_ITEMS.includes(lineItem)) throw new Error(`line_item "${r.line_item}" must be one of ${LINE_ITEMS.join(", ")}`);
         return {
-          invoiceId: required(r, "invoice_id"),
-          customerId: required(r, "customer_id"),
+          invoiceId: id(r, "invoice_id"),
+          customerId: id(r, "customer_id"),
           period: r.period!,
           lineItem,
           quantity: parseWholeNumber(r.quantity || "0", "quantity"),
           amountCents: parseCents(r.amount || "0", "amount"),
           taxCents: parseCents(r.tax || "0", "tax"),
           creditsCents: parseCents(r.credits || "0", "credits"),
-          creditMemoId: r.credit_memo_id ?? "",
+          creditMemoId: r.credit_memo_id ? id(r, "credit_memo_id") : "",
           source,
         };
       },
@@ -127,20 +128,25 @@ export function parseInputs(files: CsvFiles): ReconcileInput {
       (r) => {
         assertPeriod(r.period!, "period");
         return {
-          creditMemoId: required(r, "credit_memo_id"),
-          customerId: required(r, "customer_id"),
+          creditMemoId: id(r, "credit_memo_id"),
+          customerId: id(r, "customer_id"),
           period: r.period!,
           amountCents: parseCents(r.amount!, "amount"),
-          reason: r.reason!,
-          approvedBy: required(r, "approved_by"),
+          reason: safeText(r.reason, "reason", { max: 200, required: true }),
+          approvedBy: safeAnalystName(r.approved_by),
         };
       },
     ),
   };
 }
 
+/** Generous for a monthly reconciliation export, small enough to keep one request bounded. */
+export const MAX_ROWS_PER_FILE = 20_000;
+
 function rows<T>(text: string, fileName: string, columns: string[], map: (r: CsvRow, source: string) => T): T[] {
-  return parseCsv(text, columns, fileName).map((r) => {
+  const parsed = parseCsv(text, columns, fileName);
+  if (parsed.length > MAX_ROWS_PER_FILE) throw new Error(`${fileName}: more than ${MAX_ROWS_PER_FILE.toLocaleString("en-US")} rows`);
+  return parsed.map((r) => {
     try {
       return map(r, r.__line);
     } catch (e) {
@@ -149,8 +155,7 @@ function rows<T>(text: string, fileName: string, columns: string[], map: (r: Csv
   });
 }
 
-function required(r: CsvRow, column: string): string {
-  const v = r[column];
-  if (!v) throw new Error(`${column} is empty`);
-  return v;
+function id(r: CsvRow, column: string): string {
+  if (!r[column]) throw new Error(`${column} is empty`);
+  return safeId(r[column]!, column);
 }

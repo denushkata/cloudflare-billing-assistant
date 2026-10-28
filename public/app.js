@@ -401,7 +401,7 @@ function decisionArea(f) {
       );
       renderLists();
     } catch (e) {
-      msg.textContent = e.message;
+      msg.textContent = `${capitalize(e.message)}${/[.!?]$/.test(e.message) ? "" : "."}`;
       button.disabled = false;
     }
   };

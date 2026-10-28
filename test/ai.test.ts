@@ -103,7 +103,7 @@ describe("guardrail and prompt", () => {
 
 describe("POST /api/reconcile", () => {
   const call = (body: unknown, ai: AiRunner) =>
-    worker.fetch(new Request("http://x/api/reconcile", { method: "POST", body: JSON.stringify(body) }), { AI: ai, LEDGER: fakeLedgers() });
+    worker.fetch(new Request("http://x/api/reconcile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), { AI: ai, LEDGER: fakeLedgers() });
 
   it("returns full calculated results for the demo even when Workers AI is down", async () => {
     const res = await call({ sample: true }, fakeAi(async () => { throw new Error("down"); }));

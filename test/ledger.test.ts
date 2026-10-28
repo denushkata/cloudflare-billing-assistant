@@ -235,7 +235,7 @@ describe("persistence through the API", () => {
     };
   };
   const post = (e: AppEnv, path: string, body: unknown) =>
-    worker.fetch(new Request(`http://x${path}`, { method: "POST", body: JSON.stringify(body) }), e);
+    worker.fetch(new Request(`http://x${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), e);
   const get = (e: AppEnv, path: string) => worker.fetch(new Request(`http://x${path}`), e);
   const findingsOf = (data: any) => data.invoices.flatMap((i: any) => i.findings);
   const C004_KEY = "INV-2026-10-004:tax_wrong_state";

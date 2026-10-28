@@ -4,6 +4,7 @@
 
 import { formatCents } from "./recon/money";
 import type { Finding, FindingType, Severity } from "./recon/reconcile";
+import { safeAnalystName, safeText, SafetyError } from "./safety";
 
 type SqlValue = string | number | null;
 export interface Sql {
@@ -75,6 +76,12 @@ export class Ledger {
     sql.exec(`CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, issue_key TEXT NOT NULL, at TEXT NOT NULL,
       actor TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')`);
+    // Defense in depth below the application code: audit events can never be edited, and
+    // a resolved issue's decision can never change. (Rows are deleted only by the demo reset.)
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS events_append_only BEFORE UPDATE ON events
+      BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END`);
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS resolved_is_final BEFORE UPDATE OF status, note, decided_by, decided_at ON issues
+      WHEN OLD.status = 'resolved' BEGIN SELECT RAISE(ABORT, 'resolved issues are final'); END`);
   }
 
   /** For each finding, the most recent decided issue of the same type from an earlier period. */
@@ -136,21 +143,28 @@ export class Ledger {
 
   decide(key: string, status: Decision, note: string, analyst: string, now: string): Issue {
     if (status !== "resolved" && status !== "escalated") throw new LedgerError("status must be resolved or escalated");
-    const name = analyst.trim();
-    if (!name || name.length > 100) throw new LedgerError("analyst name is required (up to 100 characters)");
-    if (note.length > MAX_NOTE_LENGTH) throw new LedgerError(`note is longer than ${MAX_NOTE_LENGTH} characters`);
+    let name: string;
+    let cleanNote: string;
+    try {
+      name = safeAnalystName(analyst);
+      cleanNote = safeText(note, "note", { max: MAX_NOTE_LENGTH });
+    } catch (e) {
+      if (e instanceof SafetyError) throw new LedgerError(e.message);
+      throw e;
+    }
+    if (typeof key !== "string" || key.length > 200) throw new LedgerError("invalid issue key");
     const issue = this.issue(key);
     if (!issue) throw new LedgerError(`no issue ${key} for this customer`);
     if (issue.status === "explained") throw new LedgerError("explained items are correct and need no decision");
     // open -> resolved | escalated, escalated -> resolved. A resolution is final: it is the audit record.
     if (issue.status === "resolved") throw new LedgerError(`already resolved by ${issue.decidedBy}; resolutions are final`);
     if (issue.status === "escalated" && status === "escalated") throw new LedgerError(`already escalated by ${issue.decidedBy}`);
-    if (!note.trim()) throw new LedgerError(`a note is required to mark an issue ${status}`);
+    if (!cleanNote) throw new LedgerError(`a note is required to mark an issue ${status}`);
     this.sql.exec(
       "UPDATE issues SET status = ?, note = ?, decided_by = ?, decided_at = ? WHERE key = ?",
-      status, note.trim(), name, now, key,
+      status, cleanNote, name, now, key,
     );
-    this.event(key, now, name, status, note.trim());
+    this.event(key, now, name, status, cleanNote);
     return this.issue(key)!;
   }
 

@@ -11,6 +11,7 @@ import { AI_TIMEOUT_MS, explainFindings, ISSUE_NAMES, MODEL, type AiRunner, type
 import { DEMO_HISTORY } from "./demo";
 import type { Decision, Issue, Ledger, Precedent } from "./ledger";
 import { parseInputs, type CsvFiles } from "./recon/model";
+import { ID_PATTERN } from "./safety";
 import { reconcile, type Finding } from "./recon/reconcile";
 
 export { CustomerLedger } from "./customer-do";
@@ -27,18 +28,25 @@ export interface AppEnv {
 
 const SAMPLE: CsvFiles = { usage: sampleUsage, plans: samplePlans, invoices: sampleInvoices, creditMemos: sampleCreditMemos };
 const SAMPLE_CUSTOMERS = [...new Set(parseInputs(SAMPLE).plans.map((p) => p.customerId))];
-const CUSTOMER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const CUSTOMER_ID = ID_PATTERN;
+/** Four CSV files as JSON text. Comfortably above the sample (~3 KB), far below Workers' own limit. */
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 export default {
   async fetch(request: Request, env: AppEnv): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const history = /^\/api\/customers\/([^/]+)\/history$/.exec(pathname);
     const decision = /^\/api\/customers\/([^/]+)\/decisions$/.exec(pathname);
     const sampleFile = /^\/api\/sample\/([a-z_]+\.csv)$/.exec(pathname);
     try {
+      if (request.method === "POST") {
+        const refused = refuseUnsafePost(request, url);
+        if (refused) return refused;
+      }
       if (pathname === "/api/reconcile" && request.method === "POST") return await handleReconcile(request, env);
-      if (history && request.method === "GET") return await handleHistory(decodeURIComponent(history[1]!), env);
-      if (decision && request.method === "POST") return await handleDecision(decodeURIComponent(decision[1]!), request, env);
+      if (history && request.method === "GET") return await handleHistory(safeDecode(history[1]!), env);
+      if (decision && request.method === "POST") return await handleDecision(safeDecode(decision[1]!), request, env);
       if (pathname === "/api/demo/reset" && request.method === "POST") return await handleDemoReset(env);
       if (sampleFile && request.method === "GET") return sampleCsv(sampleFile[1]!);
       return json({ error: "Not found" }, 404);
@@ -48,6 +56,33 @@ export default {
     }
   },
 };
+
+/**
+ * Every state-changing request must be same-origin JSON. Requiring application/json forces a
+ * CORS preflight that this API never approves, so another site cannot make a visitor's browser
+ * record decisions, reset the demo or spend AI calls (CSRF). The Origin and Sec-Fetch-Site
+ * checks refuse cross-site requests outright.
+ */
+function refuseUnsafePost(request: Request, url: URL): Response | null {
+  const origin = request.headers.get("origin");
+  if (origin && origin !== url.origin) return json({ error: "Cross-origin requests are not allowed." }, 403);
+  if (request.headers.get("sec-fetch-site") === "cross-site") return json({ error: "Cross-site requests are not allowed." }, 403);
+  if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+    return json({ error: "Content-Type must be application/json." }, 415);
+  }
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
+    return json({ error: "Request is too large (limit 5 MB)." }, 413);
+  }
+  return null;
+}
+
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return ""; // fails the ID check and returns 400
+  }
+}
 
 const ledger = (env: AppEnv, customerId: string) => env.LEDGER.get(env.LEDGER.idFromName(customerId) as never);
 
@@ -185,7 +220,7 @@ function sampleCsv(name: string): Response {
   const body = SAMPLE_FILES[name];
   if (!body) return json({ error: "Not found" }, 404);
   return new Response(body, {
-    headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${name}"` },
+    headers: { ...API_HEADERS, "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${name}"` },
   });
 }
 
@@ -199,17 +234,33 @@ function groupBy(findings: Finding[], key: (f: Finding) => string) {
   return out;
 }
 
+/** Keep only the four known files, and only non-empty strings. */
 function stripEmpty(files: Partial<CsvFiles>): Partial<CsvFiles> {
-  return Object.fromEntries(Object.entries(files).filter(([, v]) => typeof v === "string" && v.trim() !== ""));
+  const keys: (keyof CsvFiles)[] = ["usage", "plans", "invoices", "creditMemos"];
+  return Object.fromEntries(
+    keys.filter((k) => typeof files[k] === "string" && files[k]!.trim() !== "").map((k) => [k, files[k]]),
+  );
 }
 
+/** Parse a JSON object body, enforcing the size limit even when Content-Length is absent. */
 async function readJson<T>(request: Request): Promise<T | undefined> {
   try {
-    return (await request.json()) as T;
+    const text = await request.text();
+    if (text.length > MAX_BODY_BYTES) return undefined;
+    const body = JSON.parse(text);
+    return body && typeof body === "object" && !Array.isArray(body) ? (body as T) : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** API responses are data only: never rendered, framed, sniffed or cached. */
+const API_HEADERS = {
+  "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "cache-control": "no-store",
+};
+
 const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+  new Response(JSON.stringify(data), { status, headers: { ...API_HEADERS, "content-type": "application/json; charset=utf-8" } });

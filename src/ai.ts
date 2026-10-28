@@ -5,11 +5,14 @@
 import type { Precedent } from "./ledger";
 import { formatCents } from "./recon/money";
 import type { Finding } from "./recon/reconcile";
+import { containsLink, hasHiddenChars } from "./safety";
 
 export const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 // Observed 4.6-7.3s for the whole parallel batch against the live model; 10s leaves headroom
 // without making a reviewer wait long when the service is degraded.
 export const AI_TIMEOUT_MS = 10_000;
+export const MAX_AI_CALLS = 50;
+const MAX_PROMPT_NOTE = 300;
 
 export interface AiRunner {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
@@ -49,7 +52,14 @@ export async function explainFindings(
   precedents: Record<string, Precedent> = {},
   timeoutMs = AI_TIMEOUT_MS,
 ): Promise<Map<string, Explanation>> {
-  const results = await Promise.all(findings.map((f) => explainOne(ai, f, precedents[f.id], timeoutMs)));
+  // Bound cost and load: one request can trigger at most MAX_AI_CALLS model calls.
+  const results = await Promise.all(
+    findings.map((f, i) =>
+      i < MAX_AI_CALLS
+        ? explainOne(ai, f, precedents[f.id], timeoutMs)
+        : Promise.resolve(unavailable(`only the first ${MAX_AI_CALLS} findings are explained per check`)),
+    ),
+  );
   return new Map(findings.map((f, i) => [f.id, results[i]!]));
 }
 
@@ -74,8 +84,11 @@ async function explainOne(ai: AiRunner, finding: Finding, precedent: Precedent |
     ]);
     const parsed = parseReply(reply);
     if (!parsed) return unavailable("the model returned an unreadable reply");
-    const invented = inventedAmounts(Object.values(parsed).join(" "), JSON.stringify(trustedFacts(facts)));
+    const replyText = Object.values(parsed).join(" ");
+    const invented = inventedAmounts(replyText, JSON.stringify(trustedFacts(facts)));
     if (invented.length) return unavailable(`the model introduced amounts not in the facts (${invented.join(", ")})`);
+    // Notes and CSV text are screened on the way in; this catches anything a prompt injection still coaxes out.
+    if (containsLink(replyText) || hasHiddenChars(replyText)) return unavailable("the reply contained a link or hidden characters");
     return {
       status: "ok",
       explanation: parsed.explanation,
@@ -126,7 +139,7 @@ export function promptFacts(f: Finding, precedent?: Precedent) {
             difference: formatCents(precedent.differenceCents),
             decision: precedent.status,
             decided_by: precedent.decidedBy,
-            analyst_note: precedent.note,
+            analyst_note: precedent.note.slice(0, MAX_PROMPT_NOTE),
           },
         }
       : {}),
