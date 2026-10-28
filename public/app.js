@@ -112,7 +112,7 @@ const TOUR_STEPS = [
   { id: "load", text: "Load the sample data", show: () => run({ sample: true }, "Sample data") },
   {
     id: "precedent",
-    text: "See the memory feature: C004's “Seen before” suggestion",
+    text: "See persistence at work: C004's “Seen before” suggestion",
     show: () => showCard("INV-2026-10-004:tax_wrong_state", ".block.precedent").then(() => markTour("precedent")),
   },
   { id: "decide", text: "Resolve or escalate an issue, with a note", show: () => showFirstOpen() },
@@ -300,7 +300,7 @@ function renderResults(data) {
   markTour("load");
 }
 
-// Tick "See the memory feature" once a "Seen before" block has actually been on screen.
+// Tick "See persistence at work" once a "Seen before" block has actually been on screen.
 const precedentSeen = new IntersectionObserver(
   (entries) => {
     if (entries.some((e) => e.isIntersecting)) markTour("precedent");
