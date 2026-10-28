@@ -145,6 +145,7 @@ export class Ledger {
     // open -> resolved | escalated, escalated -> resolved. A resolution is final: it is the audit record.
     if (issue.status === "resolved") throw new LedgerError(`already resolved by ${issue.decidedBy}; resolutions are final`);
     if (issue.status === "escalated" && status === "escalated") throw new LedgerError(`already escalated by ${issue.decidedBy}`);
+    if (!note.trim()) throw new LedgerError(`a note is required to mark an issue ${status}`);
     this.sql.exec(
       "UPDATE issues SET status = ?, note = ?, decided_by = ?, decided_at = ? WHERE key = ?",
       status, note.trim(), name, now, key,

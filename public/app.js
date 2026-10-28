@@ -125,18 +125,11 @@ function renderResults(data) {
     h(
       "section",
       { "aria-label": "Summary" },
-      h(
-        "div",
-        { class: "tiles" },
-        tile(data.counts.invoices, "Invoices checked", ""),
-        tile(data.counts.flagged, "Flagged", "flagged"),
-        tile(data.counts.explained, "Explained", "explained"),
-        tile(data.counts.clean, "Clean", "clean"),
-      ),
+      tilesEl,
       h(
         "p",
         { class: "meta" },
-        `Period ${data.period.join(", ")} · ${aiOk} of ${findings.length} explanations from ${data.ai.model.split("/").pop()} · ${(data.durationMs / 1000).toFixed(1)}s${sourceNote}`,
+        `Period ${data.period.join(", ")} · this check flagged ${data.counts.flagged} of ${data.counts.invoices} invoices · ${aiOk} of ${findings.length} explanations from ${data.ai.model.split("/").pop()} · ${(data.durationMs / 1000).toFixed(1)}s${sourceNote}`,
       ),
       data.warnings.map((w) => h("p", { class: "warn" }, w)),
     ),
@@ -151,6 +144,21 @@ function renderResults(data) {
 let current = null; // last reconciliation response
 const filters = { customer: "", period: "", status: "", sort: "customer" };
 const listsEl = h("div", { class: "lists" });
+const tilesEl = h("div", { class: "tiles" });
+
+/** Tiles count invoices by the same review status the All invoices table shows, so the two always agree. */
+function renderTiles(data) {
+  const statuses = data.invoices.map(reviewStatus);
+  const n = (s) => statuses.filter((x) => x === s).length;
+  tilesEl.replaceChildren(
+    tile(data.invoices.length, "Invoices checked", ""),
+    tile(n("flagged"), "Flagged, open", "flagged"),
+    tile(n("escalated"), "Escalated", "escalated"),
+    tile(n("resolved"), "Resolved", "resolved"),
+    tile(n("explained"), "Explained", "explained"),
+    tile(n("clean"), "Clean", "clean"),
+  );
+}
 const STATUS_ORDER = { open: 0, escalated: 1, resolved: 2, explained: 3, flagged: 0, clean: 4 };
 const SORTS = {
   customer: { label: "Customer", cmp: (a, b) => a.customerId.localeCompare(b.customerId) || a.invoiceId.localeCompare(b.invoiceId) },
@@ -214,12 +222,13 @@ function renderLists() {
     .sort(SORTS[filters.sort].cmp);
   const count = (s) => all.filter((f) => f.status === s).length;
 
+  renderTiles(data);
   listsEl.replaceChildren(
     ...[
       h(
         "p",
         { class: "meta progress" },
-        `Review progress: ${count("open")} open · ${count("escalated")} escalated · ${count("resolved")} resolved`,
+        `Issues: ${count("open")} open · ${count("escalated")} escalated · ${count("resolved")} resolved`,
         filtered ? ` · showing ${shown.length} of ${all.length} findings` : "",
       ),
       section(
@@ -356,8 +365,9 @@ function decisionArea(f) {
   const note = h("textarea", {
     rows: "1",
     maxlength: "1000",
-    placeholder: f.status === "escalated" ? "Resolution note (what was done)" : "Note (what you did and why)",
+    placeholder: f.status === "escalated" ? "Resolution note, required (what was done)" : "Note, required (what you did and why)",
     "aria-label": `Note for ${f.id}`,
+    required: true,
     oninput: (ev) => (f.draft = ev.target.value), // survives re-renders from filtering or other decisions
   });
   note.value = f.draft ?? "";
@@ -368,6 +378,12 @@ function decisionArea(f) {
     if (!analyst) {
       msg.textContent = "Enter your name at the top of the page first; it goes in the audit trail.";
       analystEl.focus();
+      return;
+    }
+    if (!note.value.trim()) {
+      msg.textContent =
+        status === "resolved" ? "Add a note before you resolve: what was done to fix it." : "Add a note before you escalate: why it needs escalating.";
+      note.focus();
       return;
     }
     button.disabled = true;

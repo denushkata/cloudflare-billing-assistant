@@ -71,10 +71,12 @@ describe("Ledger", () => {
     ["no analyst name", { analyst: " " }, "analyst name is required"],
     ["a very long note", { note: "x".repeat(1001) }, "note is longer than 1000"],
     ["an unknown issue", { key: "nope" }, "no issue nope"],
+    ["a blank note on resolve", { note: "   " }, "a note is required to mark an issue resolved"],
+    ["a blank note on escalate", { status: "escalated", note: "" }, "a note is required to mark an issue escalated"],
   ])("rejects a decision with %s", (_, o, message) => {
     const l = new Ledger(memorySql());
     l.record([{ finding: finding(), explanation: null }], T1);
-    const a = { key: finding().id, status: "resolved", note: "", analyst: "a", ...o };
+    const a = { key: finding().id, status: "resolved", note: "Credit issued", analyst: "a", ...o };
     expect(() => l.decide(a.key, a.status as never, a.note, a.analyst, T1)).toThrow(message);
   });
 
@@ -308,7 +310,7 @@ describe("persistence through the API", () => {
   it("demo reset clears decisions and restores the seed", async () => {
     const e = env();
     await post(e, "/api/reconcile", { sample: true });
-    await post(e, "/api/customers/C004/decisions", { issueKey: C004_KEY, status: "resolved", analyst: "a" });
+    await post(e, "/api/customers/C004/decisions", { issueKey: C004_KEY, status: "resolved", note: "Credit issued", analyst: "a" });
     expect((await post(e, "/api/demo/reset", {})).status).toBe(200);
     const history = (await (await get(e, "/api/customers/C004/history")).json()) as any;
     expect(history.issues.map((i: any) => i.key)).toEqual(["INV-2026-09-004:tax_wrong_state"]);

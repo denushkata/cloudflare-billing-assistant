@@ -105,12 +105,14 @@ details.upload summary { cursor: pointer; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
 #results { margin: 20px 0 40px; display: grid; gap: 24px; }
-.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
 .tile { padding: 14px; text-align: left; }
 .tile .n { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tile .l { color: var(--muted); font-size: 13px; }
 .tile.flagged .n { color: var(--error-ink); }
 .tile.explained .n { color: var(--info-ink); }
+.tile.escalated .n { color: var(--warn-ink); }
+.tile.resolved .n { color: var(--ok-ink); }
 .tile.clean .n { color: var(--ok-ink); }
 .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: var(--radius); margin-top: 8px; }
@@ -187,7 +189,7 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .site-foot { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
 
 @media (max-width: 640px) {
-  .tiles { grid-template-columns: repeat(2, 1fr); }
+  .tiles { grid-template-columns: repeat(3, 1fr); }
   .amounts { grid-template-columns: 1fr; }
   .decision { grid-template-columns: 1fr 1fr; }
   .decision textarea { grid-column: 1 / -1; }
