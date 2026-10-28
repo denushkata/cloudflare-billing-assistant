@@ -85,6 +85,18 @@ describe("Ledger", () => {
     expect(() => l.decide(f.id, "resolved", "", "a", T1)).toThrow("need no decision");
   });
 
+  it("treats a resolution as final and allows escalated -> resolved only", () => {
+    const l = new Ledger(memorySql());
+    l.record([{ finding: finding(), explanation: null }], T1);
+    l.decide(finding().id, "escalated", "Needs tax team", "a", T1);
+    expect(() => l.decide(finding().id, "escalated", "again", "b", T2)).toThrow("already escalated by a");
+    l.decide(finding().id, "resolved", "Credit issued", "b", T2);
+    expect(() => l.decide(finding().id, "resolved", "changed my mind", "c", T2)).toThrow("already resolved by b; resolutions are final");
+    expect(() => l.decide(finding().id, "escalated", "reopen", "c", T2)).toThrow("resolutions are final");
+    expect(l.history().issues[0]).toMatchObject({ status: "resolved", note: "Credit issued", decidedBy: "b" });
+    expect(l.history().events.map((e) => e.action)).toEqual(["resolved", "escalated", "detected"]);
+  });
+
   it("finds the most recent decided issue of the same type from an earlier period", () => {
     const l = new Ledger(memorySql());
     const past = (period: string, decided: boolean, type: Finding["type"] = "tax_wrong_state") => {

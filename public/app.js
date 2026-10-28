@@ -204,24 +204,52 @@ function renderLists() {
   const all = data.invoices.flatMap((inv) => inv.findings);
   const matches = (x) => (!filters.customer || x.customerId === filters.customer) && (!filters.period || x.period === filters.period);
   const shown = all.filter((f) => matches(f) && (!filters.status || f.status === filters.status)).sort(SORTS[filters.sort].cmp);
-  const errors = shown.filter((f) => f.severity === "error");
-  const explained = shown.filter((f) => f.severity === "explained");
+  const pending = shown.filter((f) => f.status === "open" || f.status === "escalated");
+  const resolved = shown.filter((f) => f.status === "resolved");
+  const explained = shown.filter((f) => f.status === "explained");
   const filtered = filters.customer || filters.period || filters.status;
-  const invoices = data.invoices.filter(matches).sort(SORTS[filters.sort].cmp);
-  const openCount = errors.filter((f) => f.status === "open").length;
+  const invoices = data.invoices
+    .filter(matches)
+    .map((inv) => ({ ...inv, status: reviewStatus(inv) }))
+    .sort(SORTS[filters.sort].cmp);
+  const count = (s) => all.filter((f) => f.status === s).length;
 
   listsEl.replaceChildren(
-    filtered ? h("p", { class: "meta" }, `Showing ${shown.length} of ${all.length} findings.`) : null,
-    errors.length
-      ? section(
-          "Needs review",
-          openCount ? `${openCount} open. Record a decision on each.` : "All decided.",
-          errors.map(findingCard),
-        )
-      : section("Needs review", "", [h("p", { class: "no-action" }, filtered ? "No errors match these filters." : "No errors found.")]),
-    explained.length ? section("Explained", "Looks different, but is correct.", explained.map(findingCard)) : null,
-    section("All invoices", "Totals include tax and approved credits.", [invoiceTable(invoices)]),
+    ...[
+      h(
+        "p",
+        { class: "meta progress" },
+        `Review progress: ${count("open")} open · ${count("escalated")} escalated · ${count("resolved")} resolved`,
+        filtered ? ` · showing ${shown.length} of ${all.length} findings` : "",
+      ),
+      section(
+        "Needs review",
+        pending.length ? "Open and escalated issues. Resolved issues move to the Resolved list." : "",
+        pending.length
+          ? pending.map(findingCard)
+          : [h("p", { class: "no-action" }, filtered ? "No open or escalated issues match these filters." : "Nothing left to review.")],
+      ),
+      resolved.length
+        ? h(
+            "details",
+            { class: "done", open: filters.status === "resolved" },
+            h("summary", {}, h("h2", {}, `Resolved (${resolved.length})`), h("span", { class: "meta" }, "Decisions are final and kept in each customer's history.")),
+            h("div", { class: "list" }, resolved.map(findingCard)),
+          )
+        : null,
+      explained.length ? section("Explained", "Looks different, but is correct.", explained.map(findingCard)) : null,
+      section("All invoices", "Totals include tax and approved credits.", [invoiceTable(invoices)]),
+    ].filter(Boolean),
   );
+}
+
+/** An invoice the check flagged is "flagged" while any issue is open, then escalated, then resolved. */
+function reviewStatus(inv) {
+  if (inv.status !== "flagged") return inv.status;
+  const statuses = inv.findings.filter((f) => f.severity === "error").map((f) => f.status);
+  if (statuses.includes("open")) return "flagged";
+  if (statuses.includes("escalated")) return "escalated";
+  return "resolved";
 }
 
 function tile(n, label, cls) {
@@ -263,7 +291,7 @@ function findingCard(f) {
     h("div", { class: "block" }, h("span", { class: "tag" }, "Calculated"), h("p", {}, f.summary)),
     aiBlock(f.ai),
     precedentBlock(f),
-    f.severity === "error" ? decisionForm(f, badge) : h("p", { class: "no-action" }, "No action needed: the invoice is correct."),
+    f.severity === "error" ? decisionArea(f) : h("p", { class: "no-action" }, "No action needed: the invoice is correct."),
   );
 }
 
@@ -309,20 +337,30 @@ function precedentBlock(f) {
   );
 }
 
-function decisionForm(f, badge) {
-  const state = h("p", { class: "state" });
-  const msg = h("p", { class: "msg", role: "alert" });
-  const note = h("textarea", { rows: "1", maxlength: "1000", placeholder: "Note (what you did and why)", "aria-label": `Note for ${f.id}` });
-  note.value = f.note ?? "";
+/**
+ * open -> Resolved or Escalated; escalated -> Resolved only; resolved is final and read-only.
+ * The server enforces the same rules; this just doesn't offer what it would refuse.
+ */
+function decisionArea(f) {
+  const decided = f.decidedBy ? `${STATUS_LABEL[f.status]} by ${f.decidedBy} on ${when(f.decidedAt)}` : "";
+  if (f.status === "resolved") {
+    return h("div", { class: "decision final" }, h("p", { class: "state" }, `${decided}.`), f.note ? h("p", { class: "final-note" }, f.note) : null);
+  }
 
-  const showState = (issue) => {
-    state.textContent =
-      issue.status === "open"
-        ? "Open: no decision recorded yet."
-        : `${STATUS_LABEL[issue.status]} by ${issue.decidedBy} on ${when(issue.decidedAt)}.`;
-    badge.className = `badge ${issue.status}`;
-    badge.textContent = STATUS_LABEL[issue.status];
-  };
+  const state = h(
+    "p",
+    { class: "state" },
+    f.status === "open" ? "Open: no decision recorded yet." : `${decided}${f.note ? `: “${f.note}”` : "."}`,
+  );
+  const msg = h("p", { class: "msg", role: "alert" });
+  const note = h("textarea", {
+    rows: "1",
+    maxlength: "1000",
+    placeholder: f.status === "escalated" ? "Resolution note (what was done)" : "Note (what you did and why)",
+    "aria-label": `Note for ${f.id}`,
+    oninput: (ev) => (f.draft = ev.target.value), // survives re-renders from filtering or other decisions
+  });
+  note.value = f.draft ?? "";
 
   const decide = async (status, button) => {
     msg.textContent = "";
@@ -338,20 +376,24 @@ function decisionForm(f, badge) {
         method: "POST",
         body: JSON.stringify({ issueKey: f.id, status, note: note.value, analyst }),
       });
-      // Keep the in-memory result current so filters and sorting use the new status.
-      Object.assign(f, { status: issue.status, note: issue.note, decidedBy: issue.decidedBy, decidedAt: issue.decidedAt });
-      showState(issue);
+      // Keep the in-memory result current, then re-render so the card moves to its new place.
+      Object.assign(f, { status: issue.status, note: issue.note, decidedBy: issue.decidedBy, decidedAt: issue.decidedAt, draft: "" });
+      setStatus(
+        status === "resolved"
+          ? `${capitalize(f.label)} on ${f.invoiceId} resolved. It moved to the Resolved list.`
+          : `${capitalize(f.label)} on ${f.invoiceId} escalated. It stays in Needs review until resolved.`,
+      );
+      renderLists();
     } catch (e) {
       msg.textContent = e.message;
-    } finally {
       button.disabled = false;
     }
   };
 
-  const resolve = h("button", { type: "button", onclick: () => decide("resolved", resolve) }, "Resolved");
-  const escalate = h("button", { type: "button", onclick: () => decide("escalated", escalate) }, "Escalated");
-  showState(f);
-  return h("div", { class: "decision" }, state, note, resolve, escalate, msg);
+  const resolve = h("button", { type: "button", onclick: () => decide("resolved", resolve) }, "Resolve");
+  const escalate =
+    f.status === "open" ? h("button", { type: "button", onclick: () => decide("escalated", escalate) }, "Escalate") : null;
+  return h("div", { class: `decision${escalate ? "" : " one"}` }, state, note, resolve, escalate, msg);
 }
 
 function invoiceTable(invoices) {

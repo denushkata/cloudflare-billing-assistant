@@ -158,6 +158,16 @@ details.upload summary { cursor: pointer; color: var(--muted); }
 .decision { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: start; border-top: 1px solid var(--line); padding-top: 12px; }
 .decision .state { grid-column: 1 / -1; font-size: 13px; color: var(--muted); margin: 0; }
 .decision .msg { grid-column: 1 / -1; font-size: 13px; color: var(--error-ink); margin: 0; }
+.decision.one { grid-template-columns: 1fr auto; }
+.decision.final { display: block; }
+.final-note { margin: 4px 0 0; white-space: pre-wrap; }
+details.done > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
+details.done > summary h2 { font-size: 17px; display: inline; }
+details.done > summary { list-style: none; }
+details.done > summary::-webkit-details-marker { display: none; }
+details.done > summary::before { content: "▸"; color: var(--muted); width: 1em; }
+details.done[open] > summary::before { content: "▾"; }
+.progress { margin: 0; }
 .no-action { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 12px; margin: 0; }
 
 .table-wrap { overflow-x: auto; }

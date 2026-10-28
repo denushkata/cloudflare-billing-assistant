@@ -142,6 +142,9 @@ export class Ledger {
     const issue = this.issue(key);
     if (!issue) throw new LedgerError(`no issue ${key} for this customer`);
     if (issue.status === "explained") throw new LedgerError("explained items are correct and need no decision");
+    // open -> resolved | escalated, escalated -> resolved. A resolution is final: it is the audit record.
+    if (issue.status === "resolved") throw new LedgerError(`already resolved by ${issue.decidedBy}; resolutions are final`);
+    if (issue.status === "escalated" && status === "escalated") throw new LedgerError(`already escalated by ${issue.decidedBy}`);
     this.sql.exec(
       "UPDATE issues SET status = ?, note = ?, decided_by = ?, decided_at = ? WHERE key = ?",
       status, note.trim(), name, now, key,
