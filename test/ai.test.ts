@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { explainFindings, inventedAmounts, promptFacts, type AiRunner } from "../src/ai";
 import worker from "../src/index";
 import type { Finding } from "../src/recon/reconcile";
+import { fakeLedgers } from "./helpers";
 
 const finding = (id: string, overrides: Partial<Finding> = {}): Finding => ({
   id,
@@ -54,7 +55,7 @@ describe("explainFindings", () => {
       if (which === "invented") return reply("The customer is owed $82.50 after a 16% adjustment.");
       return reply();
     });
-    const out = await explainFindings(ai, findings, 100);
+    const out = await explainFindings(ai, findings, {}, 100);
     expect(out.get("ok")?.status).toBe("ok");
     expect(out.get("error")).toEqual({ status: "unavailable", note: "Explanation unavailable: the AI service returned an error." });
     expect(out.get("slow")).toEqual({ status: "unavailable", note: "Explanation unavailable: no reply within 0.1s." });
@@ -102,7 +103,7 @@ describe("guardrail and prompt", () => {
 
 describe("POST /api/reconcile", () => {
   const call = (body: unknown, ai: AiRunner) =>
-    worker.fetch(new Request("http://x/api/reconcile", { method: "POST", body: JSON.stringify(body) }), { AI: ai });
+    worker.fetch(new Request("http://x/api/reconcile", { method: "POST", body: JSON.stringify(body) }), { AI: ai, LEDGER: fakeLedgers() });
 
   it("returns full calculated results for the demo even when Workers AI is down", async () => {
     const res = await call({ sample: true }, fakeAi(async () => { throw new Error("down"); }));
