@@ -111,7 +111,7 @@ Three rows were accepted:
 
 | Set | Result |
 |---|---|
-| many_exceptions | All 500 calculated results appear. AI calls stop at 50 per check; the rest say so. When Workers AI is unavailable, every card still shows its numbers. Locally the run takes about 22 s with real Durable Objects, most of it creating 500 new customer ledgers |
+| many_exceptions | All 500 calculated results appear. AI calls stop at 50 per check; the rest say so. When Workers AI is unavailable, every card still shows its numbers. With real Durable Objects, the run takes about 22 s locally and 14 s on the deployed Worker (free plan), with no storage errors. Insights across the 500 customers take about 25 s live |
 | large_usage | 7.4 MB is over the 5 MB limit for one check. The page refuses it before uploading, with advice to split or summarize the export, and the server gives the same message. `usage.csv` is not committed: run `node test-data/4-stress/large_usage/generate-usage.mjs` to recreate an equivalent file |
 
 ## By hand

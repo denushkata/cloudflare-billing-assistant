@@ -4,7 +4,7 @@ A small AI-powered app on Cloudflare that checks whether customer invoices match
 
 Built for the Cloudflare optional assignment (Senior Director of Engineering, Billing Platform).
 
-**Live demo:** *(URL added after deployment)*. Click **Load sample data**. No files or sign-in are needed.
+**Live demo:** https://billing-reconciliation-assistant.denitza-krasteva.workers.dev. Click **Load sample data**. No files or sign-in are needed.
 
 ## Design principle: code calculates, AI explains
 
@@ -135,7 +135,8 @@ The demo uses the four files in [sample-data/](sample-data/): 10 customers in Oc
   ```bash
   node test-data/4-stress/large_usage/generate-usage.mjs
   ```
-- **Browser checks** were done against `wrangler dev` with real Durable Objects and real Workers AI:
+- **On the deployed Worker**, the functional, security and 500-exception sets give the same results as locally. The 500-exception set takes about 14 seconds, and insights across those 500 customers about 25 seconds. That is the reason for the aggregate store in next steps.
+- **Browser checks** were done against `wrangler dev` and the live site, with real Durable Objects and real Workers AI:
   - the demo flow;
   - light and dark themes, and phone widths;
   - the security set, with `alert` trapped to confirm nothing executes.
