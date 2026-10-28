@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import invoices from "../sample-data/invoices.csv";
+import usage from "../sample-data/usage.csv";
 import { explainFindings, type AiRunner } from "../src/ai";
 import { DEMO_HISTORY } from "../src/demo";
 import worker, { type AppEnv } from "../src/index";
@@ -100,6 +102,66 @@ describe("Ledger", () => {
     expect(l.precedents([finding({ type: "duplicate_line" })])).toEqual({});
   });
 
+  describe("precedent edge cases", () => {
+    /** Record a tax_wrong_state issue (or another type) on its own invoice and optionally decide it. */
+    const past = (
+      l: Ledger,
+      o: { period: string; invoice: string; type?: Finding["type"]; decision?: "resolved" | "escalated"; at?: string },
+    ) => {
+      const type = o.type ?? "tax_wrong_state";
+      const f = finding({ id: `${o.invoice}:${type}`, invoiceId: o.invoice, period: o.period, type });
+      l.record([{ finding: f, explanation: null }], T1);
+      if (o.decision) l.decide(f.id, o.decision, `${o.decision} on ${o.invoice}`, "a", o.at ?? `${o.period}-28T00:00:00Z`);
+    };
+
+    it("breaks a same-period tie by the most recent decision", () => {
+      const l = new Ledger(memorySql());
+      past(l, { period: "2026-09", invoice: "INV-A", decision: "resolved", at: "2026-10-05T09:00:00Z" });
+      past(l, { period: "2026-09", invoice: "INV-B", decision: "resolved", at: "2026-10-06T09:00:00Z" });
+      past(l, { period: "2026-09", invoice: "INV-C", decision: "resolved", at: "2026-10-04T09:00:00Z" });
+      expect(l.precedents([finding()])[finding().id]?.invoiceId).toBe("INV-B");
+    });
+
+    it("counts an escalated issue as a precedent, not only resolved ones", () => {
+      const l = new Ledger(memorySql());
+      past(l, { period: "2026-09", invoice: "INV-9", decision: "escalated" });
+      expect(l.precedents([finding()])[finding().id]).toMatchObject({ status: "escalated", note: "escalated on INV-9" });
+    });
+
+    it("ignores issues from the same period, even if already decided", () => {
+      const l = new Ledger(memorySql());
+      past(l, { period: "2026-10", invoice: "INV-OTHER", decision: "resolved" });
+      expect(l.precedents([finding()])).toEqual({});
+    });
+
+    it("never uses the finding's own record as its precedent on a re-run", () => {
+      const l = new Ledger(memorySql());
+      l.record([{ finding: finding(), explanation: null }], T1);
+      l.decide(finding().id, "resolved", "done", "a", T1);
+      expect(l.precedents([finding()])).toEqual({});
+    });
+
+    it("matches each finding to its own type when one customer has several", () => {
+      const l = new Ledger(memorySql());
+      past(l, { period: "2026-08", invoice: "INV-TAX", decision: "resolved" });
+      past(l, { period: "2026-09", invoice: "INV-DISC", type: "discount_missing", decision: "escalated" });
+      const tax = finding();
+      const discount = finding({ id: "INV-2026-10-004:discount_missing", type: "discount_missing" });
+      const dup = finding({ id: "INV-2026-10-004:duplicate_line", type: "duplicate_line" });
+      const out = l.precedents([tax, discount, dup]);
+      expect(out[tax.id]).toMatchObject({ invoiceId: "INV-TAX", type: "tax_wrong_state", status: "resolved" });
+      expect(out[discount.id]).toMatchObject({ invoiceId: "INV-DISC", type: "discount_missing", status: "escalated" });
+      expect(out).not.toHaveProperty(dup.id);
+    });
+
+    it("does not treat an explained item as a precedent", () => {
+      const l = new Ledger(memorySql());
+      const f = finding({ id: "INV-7:credit_applied", invoiceId: "INV-7", period: "2026-09", type: "credit_applied", severity: "explained" });
+      l.record([{ finding: f, explanation: null }], T1);
+      expect(l.precedents([finding({ id: "INV-8:credit_applied", type: "credit_applied", severity: "explained" })])).toEqual({});
+    });
+  });
+
   it("seeds idempotently and resets", () => {
     const l = new Ledger(memorySql());
     l.seed(DEMO_HISTORY.C004!);
@@ -183,6 +245,22 @@ describe("persistence through the API", () => {
     const f = findingsOf(data).find((x: any) => x.id === C004_KEY);
     expect(f.ai.status).toBe("unavailable");
     expect(f.precedent.summary).toContain("Seen before in 2026-09");
+  });
+
+  it("never matches another customer's history", async () => {
+    const e = env();
+    await post(e, "/api/reconcile", { sample: true }); // seeds C004's September tax error
+    // Give C010 (a CA customer) the same issue type: tax charged at the WA rate.
+    const wrongStateForC010 = invoices
+      .replace("INV-2026-10-010,C010,2026-10,base,1,500.00,36.25", "INV-2026-10-010,C010,2026-10,base,1,500.00,32.50")
+      .replace("INV-2026-10-010,C010,2026-10,overage,250,20.00,1.45", "INV-2026-10-010,C010,2026-10,overage,250,20.00,1.30");
+    const data = (await (await post(e, "/api/reconcile", { files: { usage, invoices: wrongStateForC010 } })).json()) as any;
+    const taxFindings = findingsOf(data).filter((f: any) => f.type === "tax_wrong_state");
+    expect(taxFindings.map((f: any) => [f.customerId, f.precedent?.invoiceId ?? null])).toEqual([
+      ["C004", "INV-2026-09-004"],
+      ["C010", null],
+    ]);
+    expect(e.prompts.filter((p) => p.includes('"customer_id": "C010"') && p.includes("previous_occurrence"))).toEqual([]);
   });
 
   it("stores decisions, shows them on later runs, and lists them in history", async () => {
