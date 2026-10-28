@@ -2,7 +2,7 @@
 
 A small AI-powered app on Cloudflare that checks whether customer invoices match actual usage and plan terms. It explains each mismatch in plain English and keeps a lasting history of issues and decisions for each customer.
 
-Built for the Cloudflare optional assignment (Senior Director of Engineering, Billing Platform).
+Built for the Cloudflare optional assignment (Senior Director of Engineering, Billing Platform). The build spec is in [docs/](<docs/Cloudflare Assignment Spec - Billing Reconciliation Assistant.md>).
 
 **Live demo:** https://billing-reconciliation-assistant.denitza-krasteva.workers.dev. Click **Load sample data**. No files or sign-in are needed.
 
