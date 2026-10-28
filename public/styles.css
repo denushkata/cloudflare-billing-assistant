@@ -194,6 +194,16 @@ details.upload summary { cursor: pointer; color: var(--muted); }
 .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: var(--radius); margin-top: 8px; }
 
+details.data-notes { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--warn-ink); border-radius: var(--radius); padding: 10px 14px; margin-top: 12px; }
+details.data-notes > summary { cursor: pointer; }
+details.data-notes .hint { font-size: 13px; }
+details.data-notes ul.rows { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
+details.data-notes .line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); }
+details.data-notes .more { list-style: none; color: var(--muted); }
+.block.quoted ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 14px; }
+.block.quoted q { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+.block.quoted .label { color: var(--muted); }
+
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; padding: 12px 14px; }
 .toolbar label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
 .toolbar select {

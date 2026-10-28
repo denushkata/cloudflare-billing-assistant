@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import sampleInvoices from "../sample-data/invoices.csv";
 import { explainFindings, inventedAmounts, promptFacts, type AiRunner } from "../src/ai";
 import worker from "../src/index";
 import type { Finding } from "../src/recon/reconcile";
@@ -131,12 +132,25 @@ describe("POST /api/reconcile", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns CSV errors with file and line", async () => {
+  it("refuses a file it cannot read as a whole, naming the file and the problem", async () => {
     const res = await call(
       { files: { usage: "customer_id,timestamp,product,quantity\nC1,yesterday,gb,5\n", invoices: "invoice_id\n" } },
       fakeAi(async () => reply()),
     );
     expect(res.status).toBe(400);
-    expect(((await res.json()) as any).error).toMatch(/^usage\.csv line 2: timestamp "yesterday"/);
+    expect(((await res.json()) as any).error).toMatch(/^invoices\.csv: missing column\(s\) customer_id/);
+  });
+
+  it("lists rows it could not read with file and line, and checks the rest", async () => {
+    const res = await call(
+      { files: { usage: "customer_id,timestamp,product,quantity\nC001,yesterday,bandwidth_gb,5\n", invoices: sampleInvoices } },
+      fakeAi(async () => reply()),
+    );
+    const d = (await res.json()) as any;
+    expect(res.status).toBe(200);
+    expect(d.rejected).toEqual([
+      { line: "usage.csv line 2", reason: 'timestamp "yesterday" must be an ISO 8601 date and time with a time zone, e.g. 2026-10-15T12:00:00Z' },
+    ]);
+    expect(d.notices).toContain("C001 was not checked: 1 of its rows could not be read (usage.csv line 2).");
   });
 });

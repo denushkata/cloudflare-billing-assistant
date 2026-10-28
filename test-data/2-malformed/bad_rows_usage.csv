@@ -1,0 +1,10 @@
+customer_id,timestamp,product,quantity
+F30,10/15/2026 3:00 PM,requests,10
+F30,2026-02-30T00:00:00Z,requests,10
+F30,2026-10-15,requests,10
+F30,2026-10-15T12:00:00,requests,10
+F30,1760000000,requests,10
+F30,,requests,10
+F30,2026-10-15T12:00:00Z,requests,1.5
+F30,2026-10-15T12:00:00Z,,10
+F30,2026-10-15T12:00:00Z,requests,9007199254740993

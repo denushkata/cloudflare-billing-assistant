@@ -1,0 +1,1 @@
+invoice_id,customer_id,period,line_item,quantity,amount,tax,credits,credit_memo_id

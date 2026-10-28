@@ -1,0 +1,3 @@
+invoice_id,customer_id,period,line_item,quantity,amount,tax,credits,credit_memo_id
+invoice_id,customer_id,period,line_item,quantity,amount,tax,credits,credit_memo_id
+INV-M4,F30,2026-10,Plan: Starter,1,100.00,0.00,0.00,

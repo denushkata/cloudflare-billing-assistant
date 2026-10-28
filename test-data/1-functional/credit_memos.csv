@@ -1,0 +1,7 @@
+credit_memo_id,customer_id,period,amount,reason,approved_by
+CM-F12,F12,2026-10,50.00,"SLA credit, 2h outage Oct 9",j.rivera
+CM-F14,F14,2026-08,40.00,"SLA credit, August incident",j.rivera
+CM-F15,F15,2026-10,30.00,Goodwill credit,
+CM-F16,F16,2026-10,25.00,SLA credit,j.rivera
+CM-F17,F17,2026-10,150.00,Migration credit,m.chen
+CM-F18,F18,2026-10,60.00,"SLA credit, Oct 14",j.rivera

@@ -1,0 +1,2 @@
+# Test data must stay byte-for-byte: some cases depend on CRLF line endings and stray carriage returns.
+test-data/**/*.csv -text

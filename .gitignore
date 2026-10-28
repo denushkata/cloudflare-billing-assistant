@@ -3,3 +3,6 @@ node_modules/
 .dev.vars
 dist/
 .claude/
+
+# 7.4 MB stress file; recreate with: node test-data/4-stress/large_usage/generate-usage.mjs
+test-data/4-stress/large_usage/usage.csv

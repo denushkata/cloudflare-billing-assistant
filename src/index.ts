@@ -32,6 +32,7 @@ const SAMPLE_CUSTOMERS = [...new Set(parseInputs(SAMPLE).plans.map((p) => p.cust
 const CUSTOMER_ID = ID_PATTERN;
 /** Four CSV files as JSON text. Comfortably above the sample (~3 KB), far below Workers' own limit. */
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_LISTED_ROWS = 200;
 
 export default {
   async fetch(request: Request, env: AppEnv): Promise<Response> {
@@ -54,6 +55,7 @@ export default {
       if (sampleFile && request.method === "GET") return sampleCsv(sampleFile[1]!);
       return json({ error: "Not found" }, 404);
     } catch (e) {
+      if (e instanceof TooLarge) return json({ error: TOO_LARGE_MESSAGE }, 413);
       console.error(e);
       return json({ error: "Something went wrong on the server. Please try again." }, 500);
     }
@@ -73,9 +75,7 @@ function refuseUnsafePost(request: Request, url: URL): Response | null {
   if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
     return json({ error: "Content-Type must be application/json." }, 415);
   }
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
-    return json({ error: "Request is too large (limit 5 MB)." }, 413);
-  }
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return json({ error: TOO_LARGE_MESSAGE }, 413);
   return null;
 }
 
@@ -158,6 +158,11 @@ async function handleReconcile(request: Request, env: AppEnv): Promise<Response>
     sources,
     ai: { model: MODEL, timeoutMs: AI_TIMEOUT_MS },
     warnings,
+    // Rows that could not be read, and how the data was interpreted. Reasons never echo the rejected value.
+    rejected: result.rejected.slice(0, MAX_LISTED_ROWS).map(({ line, reason }) => ({ line, reason })),
+    rejectedCount: result.rejected.length,
+    notices: result.notices.slice(0, MAX_LISTED_ROWS),
+    noticeCount: result.notices.length,
     invoices: result.invoices.map((inv) => ({
       ...inv,
       plantedCase: body.sample ? (PLANTED_CASES[inv.invoiceId] ?? null) : null,
@@ -288,11 +293,15 @@ function stripEmpty(files: Partial<CsvFiles>): Partial<CsvFiles> {
   );
 }
 
+const TOO_LARGE_MESSAGE =
+  "The files together are larger than 5 MB, the limit for one check. Split the usage export by customer or by week, or summarize it to daily totals per customer.";
+class TooLarge extends Error {}
+
 /** Parse a JSON object body, enforcing the size limit even when Content-Length is absent. */
 async function readJson<T>(request: Request): Promise<T | undefined> {
+  const text = await request.text();
+  if (text.length > MAX_BODY_BYTES) throw new TooLarge();
   try {
-    const text = await request.text();
-    if (text.length > MAX_BODY_BYTES) return undefined;
     const body = JSON.parse(text);
     return body && typeof body === "object" && !Array.isArray(body) ? (body as T) : undefined;
   } catch {

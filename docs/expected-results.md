@@ -45,14 +45,43 @@ Totals include tax and approved credits.
 - **Rounding** is half away from zero, to the cent.
 - **Base fee** is prorated by day across plan changes and rounded once:
   (200.00 × 15 + 500.00 × 16) / 31 = $354.84.
-- **Overage** is (usage − included) × rate, using the plan in effect on the last day of the period. Usage is assigned to months in the billing time zone, not by the UTC calendar.
+- **Overage** is (usage − included) × rate, using the plan in effect on the last day of the period.
+  - Usage is assigned to months in the billing time zone, not by the UTC calendar. Timestamps must carry a zone (`Z` or an offset such as `-04:00`).
+  - Negative quantities are adjustments and net against the month's usage.
+  - Rates are exact to 9 decimal places, and quantity × rate uses big-integer math.
+  - The plan meters one product: the optional `product` column in plans.csv, or else the product most usage rows report. Usage of any other product is reported as unpriced.
 - **Discount** is the contract percentage of base + overage, shown as a negative line.
 - **Tax** is computed per line at the plan's state rate.
-  - The rates are an illustrative table: CA 7.25%, CO 2.9%, FL 6%, NY 4%, TX 6.25%, WA 6.5%.
+  - The rates are an illustrative table: CA 7.25%, CO 2.9%, FL 6%, NY 4%, OR 0% (no sales tax), TX 6.25%, WA 6.5%.
   - Each rate is unique, so a wrong-state charge can be traced to a single state.
 - **Credits** are legitimate only when the line's `credit_memo_id` points to an approved memo with the same customer, period and amount.
   - A matching credit is reported as `explained`.
-  - Anything else is flagged as `unsupported_credit`, with the reason: no reference, unknown memo, wrong customer, wrong period, or amount differs. These cases are covered by unit tests rather than the sample data.
+  - Anything else is flagged as `unsupported_credit`, with the reason:
+    - no reference
+    - unknown or rejected memo
+    - wrong customer or period
+    - no approver
+    - already applied on another invoice
+    - amount differs
+
+    These cases are covered by unit tests and `test-data/`, not the sample data.
+  - An approved memo that no invoice cites is flagged as `credit_not_applied`.
+  - Approved credits larger than an invoice's charges are flagged as `credit_exceeds_charges`. An invoice should not go below zero.
+
+### Across a customer's invoices
+
+A customer's invoices for one period are checked together. Each finding is filed on the invoice that holds the line:
+- A line billed on two invoices is a duplicate.
+- A customer with plan terms but no invoice is `unbilled`.
+- A line whose description doesn't start with a known component (`base`/`plan`, `overage`/`usage`, `discount`, `credit`) can't be checked on its own. The charges are compared as a whole (`unrecognized_line`).
+
+### Rows that cannot be read
+
+Each rejected row is listed with its file, line and reason.
+- A customer with a rejected plan, usage or invoice row is not checked at all, so partial data is never reported as clean.
+- Customer IDs are matched without regard to case or surrounding spaces.
+
+See [test-data/RESULTS.md](../test-data/RESULTS.md) for the full set of edge cases.
 
 ### One root cause, one finding
 

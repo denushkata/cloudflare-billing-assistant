@@ -254,14 +254,20 @@ async function run(body, label) {
 
 $("#demo").addEventListener("click", () => run({ sample: true }, "Sample data"));
 
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
 $("#upload-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const form = new FormData(ev.target);
-  const files = {};
-  for (const name of ["usage", "invoices", "plans", "creditMemos"]) {
-    const file = form.get(name);
-    if (file && file.size) files[name] = await file.text();
+  const chosen = ["usage", "invoices", "plans", "creditMemos"].map((name) => [name, form.get(name)]).filter(([, f]) => f && f.size);
+  const bytes = chosen.reduce((n, [, f]) => n + f.size, 0);
+  if (bytes > MAX_UPLOAD_BYTES) {
+    // Same limit the server enforces; checking here saves uploading megabytes only to be refused.
+    setStatus(`These files total ${(bytes / 1024 / 1024).toFixed(1)} MB; one check accepts up to 5 MB. Split the usage export by customer or by week, or summarize it to daily totals per customer.`, { error: true });
+    return;
   }
+  const files = {};
+  for (const [name, file] of chosen) files[name] = await file.text();
   if (!files.usage || !files.invoices) {
     setStatus("Choose at least usage.csv and invoices.csv.", { error: true });
     return;
@@ -307,6 +313,7 @@ function renderResults(data) {
       ),
       data.warnings.map((w) => h("p", { class: "warn" }, w)),
     ),
+    dataNotes(data),
     insightsEl,
     toolbar(data),
     listsEl,
@@ -314,6 +321,32 @@ function renderResults(data) {
   renderLists();
   markTour("load");
   loadInsights(data, { narrative: true });
+}
+
+/** Rows that could not be read and how the data was interpreted. Open by default when rows were rejected. */
+function dataNotes(data) {
+  const rejected = data.rejected ?? [];
+  const notices = data.notices ?? [];
+  if (!rejected.length && !notices.length) return null;
+  const more = (shown, total) => (total > shown ? h("li", { class: "more" }, `…and ${total - shown} more`) : null);
+  const parts = [
+    rejected.length ? `${data.rejectedCount} ${data.rejectedCount === 1 ? "row" : "rows"} could not be read` : null,
+    notices.length ? `${data.noticeCount} ${data.noticeCount === 1 ? "note" : "notes"} on how the data was read` : null,
+  ].filter(Boolean);
+  return h(
+    "details",
+    { class: "data-notes", open: rejected.length > 0 },
+    h("summary", {}, h("strong", {}, "Data checks"), h("span", { class: "hint" }, ` ${parts.join(" · ")}`)),
+    rejected.length
+      ? h(
+          "div",
+          {},
+          h("p", { class: "hint" }, "These rows were left out. A customer with a rejected plan, usage or invoice row is not checked, so it is never reported as clean on partial data."),
+          h("ul", { class: "rows" }, rejected.map((r) => h("li", {}, h("span", { class: "line" }, r.line), ` ${r.reason}`)), more(rejected.length, data.rejectedCount)),
+        )
+      : null,
+    notices.length ? h("ul", { class: "rows" }, notices.map((n) => h("li", {}, n)), more(notices.length, data.noticeCount)) : null,
+  );
 }
 
 // ---------- insights (all numbers come from /api/insights; the model only writes the summary) ----------
@@ -661,9 +694,24 @@ function findingCard(f) {
       amount("Difference", signed(f.differenceCents), direction(f.differenceCents)),
     ),
     h("div", { class: "block" }, h("span", { class: "tag" }, "Calculated"), h("p", {}, f.summary)),
+    quotedBlock(f.quoted),
     aiBlock(f.ai),
     precedentBlock(f),
     f.severity === "error" ? decisionArea(f) : h("p", { class: "no-action" }, "No action needed: the invoice is correct."),
+  );
+}
+
+const QUOTED_LABEL = { line_items: "Line item", unmatched_line_items: "Line item", memo_reason: "Memo reason" };
+
+/** Text copied from the uploaded files, shown verbatim as text (never interpreted) so a reviewer can see exactly what the model saw. */
+function quotedBlock(quoted) {
+  if (!quoted) return null;
+  const items = Object.entries(quoted).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map((text) => [QUOTED_LABEL[k] ?? k, text]));
+  return h(
+    "div",
+    { class: "block quoted" },
+    h("span", { class: "tag" }, "From the file"),
+    h("ul", {}, items.map(([label, text]) => h("li", {}, h("span", { class: "label" }, `${label}: `), h("q", {}, text)))),
   );
 }
 

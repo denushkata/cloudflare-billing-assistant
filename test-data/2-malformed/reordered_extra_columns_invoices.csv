@@ -1,0 +1,2 @@
+customer_id,notes,invoice_id,amount,period,line_item,tax,quantity,credits,credit_memo_id
+F30,"extra column, should be ignored",INV-M2,100.00,2026-10,Plan: Starter,0.00,1,0.00,

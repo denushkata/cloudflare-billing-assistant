@@ -47,7 +47,11 @@ export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export function safeId(raw: string, field: string): string {
   const id = raw.trim();
-  if (!ID_PATTERN.test(id)) throw new SafetyError(`${field} "${id.slice(0, 40)}" must be 1-64 letters, digits, ".", "_" or "-"`);
+  if (!ID_PATTERN.test(id)) {
+    // IDs are ASCII, so any other character is shown as an escape: a Cyrillic "С01" must not read as C01.
+    const shown = id.slice(0, 40).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+    throw new SafetyError(`${field} "${shown}" must be 1-64 letters, digits, ".", "_" or "-"`);
+  }
   return id;
 }
 
@@ -61,6 +65,15 @@ export function safeAnalystName(raw: unknown): string {
     throw new SafetyError("analyst name may contain letters, digits, spaces, and . ' _ - only (up to 100 characters)");
   }
   return name;
+}
+
+/**
+ * Make a message that quotes untrusted input safe to list: hidden and control characters become
+ * visible escapes (so a right-to-left override cannot reorder what the reviewer reads), and length is capped.
+ */
+export function visibleText(text: string, max = 200): string {
+  const shown = text.replace(new RegExp(HIDDEN_CHARS.source, "g"), (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return shown.length > max ? `${shown.slice(0, max - 1)}…` : shown;
 }
 
 /** A refusal whose message is safe to show to the user. */

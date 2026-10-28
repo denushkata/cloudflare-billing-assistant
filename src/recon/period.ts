@@ -1,4 +1,4 @@
-// Billing periods are calendar months in the billing time zone. Usage timestamps arrive in UTC.
+// Billing periods are calendar months in the billing time zone. Usage timestamps carry their own offset.
 
 export const BILLING_TIME_ZONE = "America/New_York";
 
@@ -12,17 +12,23 @@ const fmt = new Intl.DateTimeFormat("en-CA", {
   hourCycle: "h23",
 });
 
-function parseUtc(timestamp: string): Date {
-  const d = new Date(timestamp);
-  if (!/(Z|[+-]00:?00)$/.test(timestamp.trim()) || Number.isNaN(d.getTime())) {
-    throw new Error(`timestamp "${timestamp}" must be ISO 8601 UTC, e.g. 2026-10-15T12:00:00Z`);
+/** ISO 8601 date and time with an explicit offset; "Z" or "-04:00" both work. A time with no zone is ambiguous, so it is refused. */
+const TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-](0\d|1[0-4]):[0-5]\d)$/;
+
+function parseTimestamp(timestamp: string): Date {
+  const m = TIMESTAMP.exec(timestamp.trim());
+  const d = new Date(timestamp.trim());
+  // JavaScript rolls Feb 30 over to Mar 2; check the calendar date exists instead.
+  const realDate = m && Number(m[2]) >= 1 && Number(m[2]) <= 12 && Number(m[3]) >= 1 && Number(m[3]) <= daysInPeriod(`${m[1]}-${m[2]}`);
+  if (!realDate || Number.isNaN(d.getTime())) {
+    throw new Error(`timestamp "${timestamp}" must be an ISO 8601 date and time with a time zone, e.g. 2026-10-15T12:00:00Z`);
   }
   return d;
 }
 
 /** "2026-11-01T03:30:00Z" -> { billing: "2026-10", utc: "2026-11", local: "2026-10-31 23:30" } */
 export function periodsFor(timestamp: string) {
-  const d = parseUtc(timestamp);
+  const d = parseTimestamp(timestamp);
   const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));
   return {
     billing: `${p.year}-${p.month}`,

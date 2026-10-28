@@ -7,7 +7,7 @@ import { explainFindings, MAX_AI_CALLS, type AiRunner } from "../src/ai";
 import worker, { type AppEnv } from "../src/index";
 import { Ledger } from "../src/ledger";
 import { parseInputs } from "../src/recon/model";
-import type { Finding } from "../src/recon/reconcile";
+import { reconcile, type Finding } from "../src/recon/reconcile";
 import { safeAnalystName, safeText } from "../src/safety";
 import { fakeLedgers, memorySql } from "./helpers";
 
@@ -131,21 +131,35 @@ describe("ledger: injection and tampering", () => {
 describe("CSV uploads", () => {
   const parse = (o: Partial<Record<"usage" | "plans" | "invoices" | "creditMemos", string>>) =>
     () => parseInputs({ usage, plans, invoices, creditMemos, ...o });
+  const rejected = (o: Parameters<typeof parse>[0]) => parse(o)().rejected.map((r) => `${r.line}: ${r.reason}`);
 
   it("refuses IDs that are not plain identifiers", () => {
-    expect(parse({ usage: usage.replace("C001,2026-10-05", "C001'; DROP--,2026-10-05") })).toThrow(/usage.csv line 2: customer_id/);
-    expect(parse({ invoices: invoices.replace("INV-2026-10-001,", "<script>,") })).toThrow(/invoices.csv line 2: invoice_id/);
+    expect(rejected({ usage: usage.replace("C001,2026-10-05", "C001'; DROP--,2026-10-05") })[0]).toMatch(/^usage.csv line 2: customer_id/);
+    expect(rejected({ invoices: invoices.replace("INV-2026-10-001,", "<script>,") })[0]).toMatch(/^invoices.csv line 2: invoice_id/);
   });
 
   it("refuses links and hidden characters in memo reasons", () => {
-    expect(parse({ creditMemos: creditMemos.replace("SLA credit for", "SLA credit, claim at https://x.test for") })).toThrow(
-      /credit_memos.csv line 3: reason cannot contain links/,
+    expect(rejected({ creditMemos: creditMemos.replace("SLA credit for", "SLA credit, claim at https://x.test for") })[0]).toMatch(
+      /^credit_memos.csv line 3: reason cannot contain links/,
     );
-    expect(parse({ creditMemos: creditMemos.replace("SLA credit", "SLA‮ credit") })).toThrow(/hidden or control/);
+    expect(rejected({ creditMemos: creditMemos.replace("SLA credit", "SLA‮ credit") })[0]).toMatch(/hidden or control/);
   });
 
-  it("refuses an approver name that is not a name", () => {
-    expect(parse({ creditMemos: creditMemos.replace("j.alvarez", "approve@corp.com") })).toThrow(/analyst name/);
+  it("refuses an approver name that is not a name, and flags the credit that cites that memo", () => {
+    const input = parse({ creditMemos: creditMemos.replace("j.alvarez", "approve@corp.com") })();
+    expect(input.rejected).toMatchObject([{ creditMemoId: "CM-2026-0142", reason: expect.stringMatching(/analyst name/) }]);
+    const f = reconcile(input).findings.find((x) => x.invoiceId === "INV-2026-10-007")!;
+    expect(f).toMatchObject({ type: "unsupported_credit", summary: "A $50.00 credit cites credit memo CM-2026-0142, which could not be accepted (credit_memos.csv line 3)." });
+  });
+
+  it("lists a rejected value only as visible, length-limited text", () => {
+    expect(rejected({ plans: plans.replace(/^C001,Starter/m, 'C001,"<img src=x onerror=alert(1)>"') })).toEqual([
+      "plans.csv line 2: plan cannot contain links, email addresses or HTML; reference a ticket or memo ID instead",
+    ]);
+    // A right-to-left override in an ID is shown as an escape, so it cannot reorder the text a reviewer reads.
+    expect(rejected({ usage: usage.replace("C001,2026-10-05", "S01‮TXE,2026-10-05") })[0]).toBe(
+      'usage.csv line 2: customer_id "S01\\u202eTXE" must be 1-64 letters, digits, ".", "_" or "-"',
+    );
   });
 
   it("caps rows per file", () => {

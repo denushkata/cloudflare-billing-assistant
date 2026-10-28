@@ -1,0 +1,8 @@
+customer_id,plan,price,included_quantity,overage_rate,discount_pct,tax_state,effective_date
+M1,Pro,300,5000,0.03,150,OR,2026-01-01
+M2,Pro,300,5000,0.03,-10,OR,2026-01-01
+M3,Pro,-300,5000,0.03,0,OR,2026-01-01
+M4,Pro,300,5000,0.03,0,XX,2026-01-01
+M5,Pro,300,5000,0.03,0,or,2026-01-01
+M6,Pro,300,5000,0.03,0,OR,2026-10-01
+M6,Business,620,20000,0.02,0,OR,2026-10-01

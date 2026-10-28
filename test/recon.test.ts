@@ -72,7 +72,7 @@ describe("planted cases in the sample data", () => {
     expect(f.invoicedCents).toBe(2000); // 400 GB over, UTC calendar
     expect(f.differenceCents).toBe(-2000);
     expect(f.facts.boundary_records).toEqual([
-      "400 units at 2026-11-01T03:30:00Z UTC = 2026-10-31 23:30 billing time, belongs to 2026-10",
+      "400 units at 2026-11-01T03:30:00Z = 2026-10-31 23:30 billing time, belongs to 2026-10",
     ]);
   });
 
@@ -140,13 +140,18 @@ describe("credits", () => {
     ["no memo reference", { creditMemoId: "" }, "has no credit memo reference", 0],
     ["unknown memo", { creditMemoId: "CM-9999" }, "does not exist", 0],
     ["memo for another customer", { creditMemoId: "CM-2026-0119" }, "belongs to C004", 0],
-    ["amount above the approved memo", { creditsCents: 7500 }, "which approved $50.00", -5000],
-  ])("flags a credit with %s", (_, patch, text, expectedCents) => {
-    const f = only("INV-2026-10-007", withCreditLine(patch));
-    expect(f.type).toBe("unsupported_credit");
-    expect(f.severity).toBe("error");
-    expect(f.summary).toContain(text);
-    expect(f.expectedCents).toBe(expectedCents);
+  ])("flags a credit with %s, and that the approved memo was never applied", (_, patch, text, expectedCents) => {
+    const [f, owed] = invoice("INV-2026-10-007", withCreditLine(patch)).findings;
+    expect(f).toMatchObject({ type: "unsupported_credit", severity: "error", expectedCents });
+    expect(f!.summary).toContain(text);
+    // CM-2026-0142 is approved for C007 but no line cites it any more: the customer is still owed $50.
+    expect(owed).toMatchObject({ type: "credit_not_applied", expectedCents: -5000, invoicedCents: 0, differenceCents: 5000 });
+  });
+
+  it("flags a credit above the approved memo", () => {
+    const f = only("INV-2026-10-007", withCreditLine({ creditsCents: 7500 }));
+    expect(f).toMatchObject({ type: "unsupported_credit", expectedCents: -5000, differenceCents: -2500 });
+    expect(f.summary).toContain("which approved $50.00");
   });
 });
 
@@ -190,18 +195,30 @@ describe("helpers", () => {
     expect(periodsFor("2026-11-01T03:30:00Z").billing).toBe("2026-10"); // EDT, UTC-4
     expect(periodsFor("2026-11-01T04:30:00Z").billing).toBe("2026-11");
     expect(periodsFor("2026-12-01T04:30:00Z").billing).toBe("2026-11"); // EST, UTC-5
-    expect(() => periodsFor("2026-10-01 12:00")).toThrow(/UTC/);
+    expect(() => periodsFor("2026-10-01 12:00")).toThrow(/time zone/);
+  });
+
+  it("honors an explicit offset and refuses times without one or dates that do not exist", () => {
+    expect(periodsFor("2026-10-31T21:30:00-04:00")).toMatchObject({ billing: "2026-10", utc: "2026-11" });
+    expect(() => periodsFor("2026-10-15T12:00:00")).toThrow(/time zone/);
+    expect(() => periodsFor("2026-02-30T00:00:00Z")).toThrow(/time zone/);
   });
 
   it("reads quoted CSV fields and reports bad rows with line numbers", () => {
-    const rows = parseCsv('a,b\r\n"x, y","say ""hi"""\r\n', ["a", "b"], "t.csv");
+    const { rows } = parseCsv('a,b\r\n"x, y","say ""hi"""\r\n', ["a", "b"], "t.csv");
     expect(rows[0]).toMatchObject({ a: "x, y", b: 'say "hi"' });
-    expect(() => parseCsv("a,b\n1\n", ["a", "b"], "t.csv")).toThrow("t.csv line 2");
+    expect(parseCsv("a,b\n1\n", ["a", "b"], "t.csv").errors).toEqual([{ line: "t.csv line 2", reason: "expected 2 fields, found 1", customerId: undefined }]);
+    expect(parseCsv("a,b\na,b\n", ["a", "b"], "t.csv").errors[0]!.reason).toBe("repeats the header row");
     expect(() => parseCsv("a\n1\n", ["a", "b"], "t.csv")).toThrow("missing column(s) b");
   });
 
-  it("names the file and line when a value is malformed", () => {
+  it("rejects a malformed row by file and line, and does not check that customer", () => {
     const files = { usage, plans, creditMemos, invoices: invoices.replace("200.00,12.50", "200.00,abc") };
-    expect(() => parseInputs(files)).toThrow('invoices.csv line 2: tax: "abc" is not a number');
+    const input = parseInputs(files);
+    expect(input.rejected).toEqual([{ line: "invoices.csv line 2", reason: 'tax: "abc" is not a number', customerId: "C001" }]);
+    const r = reconcile(input);
+    expect(r.invoices.map((i) => i.customerId)).not.toContain("C001");
+    expect(r.notices).toContain("C001 was not checked: 1 of its rows could not be read (invoices.csv line 2).");
+    expect(r.counts.invoices).toBe(9);
   });
 });
