@@ -6,7 +6,7 @@ import { DEMO_HISTORY } from "../src/demo";
 import worker, { type AppEnv } from "../src/index";
 import { Ledger, type Precedent } from "../src/ledger";
 import type { Finding } from "../src/recon/reconcile";
-import { fakeLedgers, memorySql } from "./helpers";
+import { fakeLedgers, fakeSessions, memorySql } from "./helpers";
 
 const finding = (o: Partial<Finding> = {}): Finding => ({
   id: "INV-2026-10-004:tax_wrong_state",
@@ -225,7 +225,7 @@ describe("persistence through the API", () => {
     const prompts: string[] = [];
     return {
       prompts,
-      LEDGER: fakeLedgers(),
+      LEDGER: fakeLedgers(), SESSION: fakeSessions(),
       AI: ai ?? {
         run: async (_m, input) => {
           prompts.push((input.messages as { content: string }[])[1]!.content);

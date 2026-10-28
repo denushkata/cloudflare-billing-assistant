@@ -315,12 +315,161 @@ function renderResults(data) {
     ),
     dataNotes(data),
     insightsEl,
+    chatEl,
     toolbar(data),
     listsEl,
   );
+  openChat(data); // sets the session first, so the cards rendered next get their "Ask" buttons
   renderLists();
   markTour("load");
   loadInsights(data, { narrative: true });
+}
+
+// ---------- chat (answers come from Workers AI, using only the server's stored results and ledgers) ----------
+
+const chatEl = h("section", { class: "chat panel", "aria-label": "Ask about these results" });
+const chat = { sessionId: null, messages: [], focus: null, busy: false, error: "" };
+const chatLog = h("div", { class: "chat-log", "aria-live": "polite" });
+const chatInput = h("textarea", {
+  rows: "2",
+  maxlength: "500",
+  placeholder: "Ask about these results, e.g. why was C002 flagged?",
+  "aria-label": "Question about these results",
+  onkeydown: (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      sendQuestion();
+    }
+  },
+});
+const chatSend = h("button", { type: "button", class: "primary", onclick: () => sendQuestion() }, "Ask");
+const chatFocusEl = h("div", { class: "chat-focus" });
+const chatSuggestEl = h("div", { class: "chat-suggest" });
+const chatMsgEl = h("p", { class: "msg", role: "alert" });
+
+chatEl.append(
+  h("div", { class: "chat-head" }, h("h2", {}, "Ask about these results"), h("span", { class: "hint" }, "Answers come only from the calculated results and each customer's history. The model never computes an amount.")),
+  chatLog,
+  chatSuggestEl,
+  chatFocusEl,
+  h("div", { class: "chat-form" }, chatInput, chatSend),
+  chatMsgEl,
+);
+
+async function openChat(data) {
+  Object.assign(chat, { sessionId: data.sessionId ?? null, messages: [], focus: null, busy: false, error: "" });
+  chatEl.hidden = !chat.sessionId;
+  chatSuggestEl.replaceChildren(...suggestions(data).map((q) => h("button", { type: "button", class: "chip-button", onclick: () => ask(q) }, q)));
+  renderChat();
+  if (!chat.sessionId) return;
+  try {
+    const { messages } = await api(`/api/sessions/${chat.sessionId}/messages`);
+    if (data === current) chat.messages = messages;
+  } catch {
+    // An empty thread is fine; asking will surface any real problem.
+  }
+  renderChat();
+}
+
+/** Starting points built from these results, so a reviewer sees what kinds of question work. */
+function suggestions(data) {
+  const findings = data.invoices.flatMap((i) => i.findings).filter((f) => f.severity === "error");
+  const largest = [...findings].sort((a, b) => Math.abs(b.differenceCents) - Math.abs(a.differenceCents))[0];
+  const repeat = findings.find((f) => f.precedent);
+  return [
+    largest ? `Why was ${largest.invoiceId} flagged?` : null,
+    repeat ? `Has ${repeat.customerId} had this issue before?` : null,
+    findings.length ? "Which issue costs customers the most in this check?" : null,
+    findings.length ? "What would the total be if we waived all overage?" : null,
+  ].filter(Boolean);
+}
+
+/** From a card's "Ask" button: scope the next question to that finding. */
+function askAbout(f) {
+  chat.focus = f;
+  renderChat();
+  chatInput.value = f.severity === "explained" ? "Why is this correct?" : "Why was this flagged?";
+  chatEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  chatInput.focus();
+}
+
+function ask(question) {
+  chatInput.value = question;
+  sendQuestion();
+}
+
+async function sendQuestion() {
+  const question = chatInput.value.trim();
+  if (!question || chat.busy || !chat.sessionId) return;
+  chat.busy = true;
+  chat.error = "";
+  const focus = chat.focus;
+  chat.pending = question;
+  chatInput.value = "";
+  renderChat();
+  try {
+    const { messages } = await api(`/api/sessions/${chat.sessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ question, analyst: analystName, ...(focus ? { focus: focus.id } : {}) }),
+    });
+    chat.messages.push(...messages);
+    chat.focus = null;
+  } catch (e) {
+    chat.error = `${capitalize(e.message)}${/[.!?]$/.test(e.message) ? "" : "."}`;
+    chatInput.value = question; // nothing was lost
+  } finally {
+    chat.busy = false;
+    chat.pending = null;
+    renderChat();
+  }
+}
+
+function renderChat() {
+  chatLog.replaceChildren(...[
+    ...(chat.messages.length || chat.pending
+      ? []
+      : [h("p", { class: "hint" }, "Try a suggestion below, or use “Ask” on any card to ask about that finding.")]),
+    ...chat.messages.map(chatMessage),
+    chat.pending ? h("div", { class: "chat-msg analyst" }, h("p", {}, chat.pending)) : null,
+    chat.busy ? h("div", { class: "chat-msg assistant pending" }, h("span", { class: "spinner", "aria-hidden": "true" }), " Looking at the results…") : null,
+  ].filter(Boolean));
+  chatLog.scrollTop = chatLog.scrollHeight;
+  chatFocusEl.replaceChildren(
+    ...(chat.focus
+      ? [
+          h("span", {}, `About: ${capitalize(chat.focus.label)} · ${chat.focus.invoiceId}`),
+          h("button", { type: "button", class: "link", "aria-label": "Stop asking about this finding", onclick: () => ((chat.focus = null), renderChat()) }, "✕"),
+        ]
+      : []),
+  );
+  chatFocusEl.hidden = !chat.focus;
+  chatSend.disabled = chat.busy;
+  chatMsgEl.textContent = chat.error;
+}
+
+function chatMessage(m) {
+  if (m.role === "analyst") return h("div", { class: "chat-msg analyst" }, h("span", { class: "who" }, m.author), h("p", {}, m.text));
+  return h(
+    "div",
+    { class: `chat-msg assistant${m.status === "ok" ? "" : " unavailable"}` },
+    h("span", { class: "who" }, m.status === "ok" ? `AI · ${m.author}` : "AI answer unavailable"),
+    h("p", {}, m.text),
+    m.missing ? h("p", { class: "missing" }, h("strong", {}, "Not in the results: "), m.missing) : null,
+    m.cited.length
+      ? h("p", { class: "cited" }, "Based on: ", m.cited.map((id) => h("button", { type: "button", class: "link", onclick: () => showFinding(id) }, id)))
+      : null,
+  );
+}
+
+/** Scroll to a cited finding's card, opening the Resolved list if it is there. */
+function showFinding(id) {
+  const card = document.getElementById(`f-${id}`);
+  if (!card) return setStatus(`${id} is hidden by the current filters.`);
+  const folded = card.closest("details");
+  if (folded) folded.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.add("spotlight");
+  setTimeout(() => card.classList.remove("spotlight"), 2000);
 }
 
 /** Rows that could not be read and how the data was interpreted. Open by default when rows were rejected. */
@@ -685,6 +834,7 @@ function findingCard(f) {
       h("h3", {}, capitalize(f.label)),
       h("span", { class: "where" }, "Customer ", customerButton(f.customerId), ` · ${f.invoiceId} · ${f.period}`),
       f.plantedCase ? h("span", { class: "chip", title: f.plantedCase.title }, `Planted case ${f.plantedCase.number} of 8`) : null,
+      chat.sessionId ? h("button", { type: "button", class: "link ask", onclick: () => askAbout(f), "aria-label": `Ask about ${f.label} on ${f.invoiceId}` }, "Ask") : null,
     ),
     h(
       "dl",

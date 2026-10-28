@@ -27,10 +27,10 @@ All financial math is deterministic code. The model never computes an amount. It
 
 | Requirement | Cloudflare component | Role in the app |
 |---|---|---|
-| LLM | Workers AI, `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Explains each finding, suggests a likely cause and a fix. Writes the insights summary |
-| Workflow / coordination | Worker pipeline plus Durable Objects | Load data → calculate → look up each customer's history → explain findings in parallel → save to each customer's ledger |
-| User input | Worker with static assets | One page: demo button, CSV upload, Resolve and Escalate with notes, history view |
-| Memory / state | Durable Objects (SQLite), one per customer | Issue history, status, analyst notes and an append-only audit trail |
+| LLM | Workers AI, `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Explains each finding, suggests a likely cause and a fix, answers the analyst's questions, and writes the insights summary |
+| Workflow / coordination | Worker pipeline plus Durable Objects | Load data → calculate → look up each customer's history → explain findings in parallel → save to each customer's ledger and to the check's review session |
+| User input (chat) | Chat panel, served by the Worker as a static asset | The analyst asks questions in plain English, such as "Why was this flagged?" or "Has C004 had this issue before?" Also on the page: the demo button, CSV upload, and Resolve and Escalate with notes |
+| Memory / state | Durable Objects (SQLite): one per customer, one per check | Per customer: issue history, status, analyst notes and an append-only audit trail. Per check: the calculated results and the chat history |
 
 ### Coordination
 
@@ -52,6 +52,20 @@ Each customer has a Durable Object with its own SQLite database ([src/ledger.ts]
 - an audit trail of events. Database triggers keep it append-only and make a resolution final.
 
 When a new finding matches a past decided issue for the same customer, the model gets that one precedent and adds a suggestion line. In the demo, C004's wrong-state sales tax was resolved in September and recurs in October. Its card reads, for example: "Same wrong-state sales tax in September 2026, resolved with a credit… It has recurred despite that fix."
+
+### Chat
+
+Below the results, the analyst can ask about them in plain English. Each card also has an **Ask** button that scopes the question to that finding. Suggested questions are built from the current results.
+
+How a question is answered ([src/chat.ts](src/chat.ts)):
+
+1. **The context is built in code, on the server.** When a check runs, the Worker stores its calculated results in a new `ReviewSession` Durable Object ([src/session.ts](src/session.ts)). After that, the page sends only the question and the session ID, so a modified page can't feed the model its own "results".
+2. **History comes from the ledgers.** For a question about a customer (named, by invoice ID, from a card, or a follow-up to the previous question), the Worker reads that customer's ledger. The model then sees decisions made after the check, and the customer's issues from earlier months.
+3. **File text and notes are kept apart.** CSV text goes in under `quoted_from_files` and analyst notes under `analyst_notes`. The prompt marks both as data, never instructions.
+4. **The reply is checked.** Every number in the answer, and in its "not in the results" note, must appear in the calculated context. A number that appears only in quoted text, a note, or the question itself doesn't count. Links and hidden characters are refused. The model's list of findings it relied on is checked against the context, and each one shows as a link to its card.
+5. **Questions that need new figures get an honest answer.** For example, "What would the total be if we waived all overage?" gets "that total is not in the calculated results". If the model computes a figure anyway, the reply is discarded, and the analyst sees "the answer used a number the code did not calculate".
+
+Questions and answers are stored in the session's Durable Object, append-only. A session deletes itself a week after its check, while decisions stay in the customers' ledgers. Each check allows up to 40 questions of up to 500 characters, and the last three exchanges go along as conversation context.
 
 ## Design choices
 
@@ -121,7 +135,7 @@ The demo uses the four files in [sample-data/](sample-data/): 10 customers in Oc
 
 ## Testing
 
-- **`npm test`** runs the unit tests (about 180) in a few seconds.
+- **`npm test`** runs the unit tests (about 210) in a few seconds.
 - **[test-data/](test-data/)** is a separate suite of 26 CSV files:
   - 30 functional edge cases;
   - malformed files;
@@ -149,12 +163,13 @@ The demo uses the four files in [sample-data/](sample-data/): 10 customers in Oc
 
   IDs must be plain identifiers, because they become storage keys. A rejected value is listed as visible, length-limited text.
 - **Everything renders as text.** The page never uses `innerHTML`. Untrusted text appears only as plain text, including text copied from files and model output.
-- **Prompt injection.** Text copied from files and past analyst notes reaches the model under labels that the prompt marks as data, not instructions. Amounts that appear only there are not trusted when the reply is checked.
+- **Prompt injection.** Text copied from files and past analyst notes reaches the model under labels that the prompt marks as data, not instructions. This applies to explanations, the insights summary and chat. Amounts that appear only there are not trusted when the reply is checked. The chat tests replay the P01, P02 and P04 cases from `test-data/3-security`, and no answer can change an issue's status.
 - **CSRF.** Every POST must be same-origin `application/json`; cross-site requests get a 403.
 - **Headers.** A strict Content Security Policy, `nosniff`, `no-referrer` and `no-store` on API responses.
 - **Limits:**
   - 5 MB and 20,000 rows per file in one check;
   - 50 AI calls per check, 10 seconds each;
+  - 40 chat questions per check, 500 characters each;
   - 1,000 characters per note.
 - **Audit trail.** Events are append-only and resolutions are final, both enforced in the database.
 
@@ -176,6 +191,7 @@ It also has a short AI summary. Every number in that summary must appear in the 
 | [src/recon/](src/recon/) | Deterministic reconciliation: CSV parsing, money, periods, tax table, checks |
 | [src/ai.ts](src/ai.ts) | Prompts, parallel calls, timeouts and reply checks |
 | [src/ledger.ts](src/ledger.ts), [src/customer-do.ts](src/customer-do.ts) | Per-customer persistence in a Durable Object |
+| [src/chat.ts](src/chat.ts), [src/session.ts](src/session.ts), [src/session-do.ts](src/session-do.ts) | Chat: context built in code, reply checks, and the per-check session Durable Object |
 | [src/insights.ts](src/insights.ts) | Exposure, aging, recurrence and hotspot metrics |
 | [src/index.ts](src/index.ts) | API routes and the coordination pipeline |
 | [src/safety.ts](src/safety.ts) | Input and output text rules |
@@ -202,7 +218,7 @@ Out of scope for this version, roughly in priority order:
 8. **A production store for insights.** Use D1 or Workers Analytics Engine, updated on each write, instead of reading every customer's Durable Object.
 9. **A real tax engine.** The state tax table is illustrative and exists only to make the demo deterministic.
 10. **Smaller items:**
-    - an "Ask about this issue" assistant on each card;
+    - voice input for the chat panel using the browser's built-in speech recognition;
     - rate limiting per user;
     - safe ticket links on an allowlisted domain;
     - if a CSV export is added, neutralize cells that start with `=`, `+`, `-` or `@`.

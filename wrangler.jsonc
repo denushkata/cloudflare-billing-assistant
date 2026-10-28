@@ -8,9 +8,18 @@
   "assets": { "directory": "public", "run_worker_first": ["/api/*"] },
   // Workers AI always runs on Cloudflare, even under `wrangler dev`.
   "ai": { "binding": "AI", "remote": true },
-  // One SQLite-backed Durable Object per customer: issue history, decisions, audit trail.
-  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "CustomerLedger" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CustomerLedger"] }],
+  // SQLite-backed Durable Objects: one per customer (issue history, decisions, audit trail)
+  // and one per reconciliation check (its calculated results and the chat about them).
+  "durable_objects": {
+    "bindings": [
+      { "name": "LEDGER", "class_name": "CustomerLedger" },
+      { "name": "SESSION", "class_name": "ReviewSession" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CustomerLedger"] },
+    { "tag": "v2", "new_sqlite_classes": ["ReviewSession"] }
+  ],
   // Sample CSVs are bundled so the demo button needs no uploads.
   "rules": [{ "type": "Text", "globs": ["**/*.csv"], "fallthrough": true }]
 }

@@ -9,7 +9,7 @@ import { Ledger } from "../src/ledger";
 import { parseInputs } from "../src/recon/model";
 import { reconcile, type Finding } from "../src/recon/reconcile";
 import { safeAnalystName, safeText } from "../src/safety";
-import { fakeLedgers, memorySql } from "./helpers";
+import { fakeLedgers, fakeSessions, memorySql } from "./helpers";
 
 const T1 = "2026-10-28T10:00:00Z";
 const finding = (o: Partial<Finding> = {}): Finding => ({
@@ -195,7 +195,7 @@ describe("AI output and cost limits", () => {
 
 describe("API request hardening", () => {
   const env = (): AppEnv => ({
-    LEDGER: fakeLedgers(),
+    LEDGER: fakeLedgers(), SESSION: fakeSessions(),
     AI: { run: async () => ({ response: { explanation: "e", likely_cause: "c", suggested_fix: "f", precedent_suggestion: "" } }) },
   });
   const post = (path: string, body: string, headers: Record<string, string> = {}, e = env()) =>

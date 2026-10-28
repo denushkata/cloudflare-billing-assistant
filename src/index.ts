@@ -12,19 +12,26 @@ import { computeInsights, insightFacts, type InsightIssue } from "./insights";
 import { DEMO_HISTORY, PLANTED_CASES } from "./demo";
 import type { Decision, Issue, Ledger, Precedent } from "./ledger";
 import { parseInputs, type CsvFiles } from "./recon/model";
-import { ID_PATTERN } from "./safety";
+import { ID_PATTERN, safeAnalystName, safeText, SafetyError } from "./safety";
 import { reconcile, type Finding } from "./recon/reconcile";
+import { answerQuestion, chatContext, customersFor, RECENT_MESSAGES } from "./chat";
+import { MAX_QUESTION_LENGTH, MAX_QUESTIONS_PER_SESSION, type SessionFinding } from "./session";
+import type { ReviewSession } from "./session-do";
 
 export { CustomerLedger } from "./customer-do";
+export { ReviewSession } from "./session-do";
 
-type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<R> | R : never };
+type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> | Awaited<R> : never };
 export type LedgerStub = Async<Pick<Ledger, "precedents" | "record" | "history" | "seed" | "reset">> & {
   decide(...a: Parameters<Ledger["decide"]>): Promise<{ issue?: Issue; error?: string }> | { issue?: Issue; error?: string };
 };
 
+export type SessionStub = Async<Pick<ReviewSession, "start" | "context" | "messages" | "append">>;
+
 export interface AppEnv {
   AI: AiRunner;
   LEDGER: { idFromName(name: string): unknown; get(id: never): LedgerStub };
+  SESSION: { idFromName(name: string): unknown; get(id: never): SessionStub };
 }
 
 const SAMPLE: CsvFiles = { usage: sampleUsage, plans: samplePlans, invoices: sampleInvoices, creditMemos: sampleCreditMemos };
@@ -41,6 +48,7 @@ export default {
     const history = /^\/api\/customers\/([^/]+)\/history$/.exec(pathname);
     const decision = /^\/api\/customers\/([^/]+)\/decisions$/.exec(pathname);
     const sampleFile = /^\/api\/sample\/([a-z_]+\.csv)$/.exec(pathname);
+    const chat = /^\/api\/sessions\/([^/]+)\/messages$/.exec(pathname);
     try {
       if (request.method === "POST") {
         const refused = refuseUnsafePost(request, url);
@@ -53,6 +61,8 @@ export default {
       if (pathname === "/api/insights" && request.method === "GET") return await handleInsights(url.searchParams, env);
       if (pathname === "/api/insights/narrative" && request.method === "POST") return await handleNarrative(request, env);
       if (sampleFile && request.method === "GET") return sampleCsv(sampleFile[1]!);
+      if (chat && request.method === "GET") return await handleChatHistory(chat[1]!, env);
+      if (chat && request.method === "POST") return await handleQuestion(chat[1]!, request, env);
       return json({ error: "Not found" }, 404);
     } catch (e) {
       if (e instanceof TooLarge) return json({ error: TOO_LARGE_MESSAGE }, 413);
@@ -152,8 +162,30 @@ async function handleReconcile(request: Request, env: AppEnv): Promise<Response>
     }),
   );
 
+  // The chat session gets this check's calculated results now, from the server, so a question
+  // later can only ever be answered from what code produced here.
+  const sessionId = crypto.randomUUID();
+  const periods = [...new Set(result.invoices.map((i) => i.period))];
+  try {
+    await session(env, sessionId).start(
+      { createdAt: now, periods, counts: result.counts, customers: [...new Set(result.invoices.map((i) => i.customerId))] },
+      result.findings.map(
+        (f): SessionFinding => ({
+          id: f.id, customerId: f.customerId, invoiceId: f.invoiceId, period: f.period, type: f.type, severity: f.severity,
+          expectedCents: f.expectedCents, invoicedCents: f.invoicedCents, differenceCents: f.differenceCents,
+          summary: f.summary, facts: f.facts, ...(f.quoted ? { quoted: f.quoted } : {}),
+          label: ISSUE_NAMES[f.type], status: stored.get(f.id)?.status ?? (f.severity === "explained" ? "explained" : "open"),
+        }),
+      ),
+    );
+  } catch (e) {
+    console.error(e);
+    warnings.push("Questions about these results are unavailable for this check.");
+  }
+
   return json({
-    period: [...new Set(result.invoices.map((i) => i.period))],
+    period: periods,
+    sessionId,
     counts: result.counts,
     sources,
     ai: { model: MODEL, timeoutMs: AI_TIMEOUT_MS },
@@ -204,6 +236,62 @@ async function handleDecision(customerId: string, request: Request, env: AppEnv)
     new Date().toISOString(),
   );
   return out.error ? json({ error: out.error }, 400) : json({ issue: out.issue });
+}
+
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const session = (env: AppEnv, id: string) => env.SESSION.get(env.SESSION.idFromName(id) as never);
+
+/** GET /api/sessions/:id/messages — the conversation so far, from the session's Durable Object. */
+async function handleChatHistory(id: string, env: AppEnv): Promise<Response> {
+  if (!SESSION_ID.test(id)) return json({ error: "Invalid session." }, 400);
+  return json({ messages: await session(env, id).messages() });
+}
+
+/**
+ * POST /api/sessions/:id/messages { question, analyst, focus? }. The page sends only the question;
+ * the context comes from the session's stored results and the named customers' ledgers.
+ */
+async function handleQuestion(id: string, request: Request, env: AppEnv): Promise<Response> {
+  if (!SESSION_ID.test(id)) return json({ error: "Invalid session." }, 400);
+  const body = await readJson<{ question?: unknown; analyst?: unknown; focus?: unknown }>(request);
+  if (!body) return json({ error: "Request body must be JSON." }, 400);
+  let question: string;
+  let analyst: string;
+  try {
+    question = safeText(body.question, "question", { max: MAX_QUESTION_LENGTH, required: true });
+    analyst = safeAnalystName(body.analyst);
+  } catch (e) {
+    if (e instanceof SafetyError) return json({ error: e.message }, 400);
+    throw e;
+  }
+  const focus = typeof body.focus === "string" && body.focus.length <= 200 ? body.focus : null;
+
+  const stub = session(env, id);
+  const ctx = await stub.context(RECENT_MESSAGES);
+  if (!ctx) return json({ error: "This check's session has expired or does not exist. Run the check again to ask about it." }, 404);
+  if (ctx.questions >= MAX_QUESTIONS_PER_SESSION) {
+    return json({ error: `This check has reached its limit of ${MAX_QUESTIONS_PER_SESSION} questions. Run the check again to keep asking.` }, 429);
+  }
+
+  const customers = customersFor(question, focus, ctx.meta, ctx.findings, ctx.recent);
+  const histories: Record<string, Issue[]> = {};
+  await Promise.all(
+    customers.map(async (c) => {
+      try {
+        histories[c] = (await ledger(env, c).history()).issues;
+      } catch (e) {
+        console.error(e); // the answer then relies on the check's results alone
+      }
+    }),
+  );
+  const context = chatContext({ meta: ctx.meta, findings: ctx.findings, customers, histories, focus });
+  const answer = await answerQuestion(env.AI, question, context, ctx.recent);
+  const at = new Date().toISOString();
+  const messages = await stub.append([
+    { at, role: "analyst", author: analyst, text: question, missing: "", cited: [], customers, focus, status: "ok" },
+    { at, role: "assistant", author: MODEL.split("/").pop()!, text: answer.text, missing: answer.missing, cited: answer.cited, customers, focus: null, status: answer.status },
+  ]);
+  return json({ messages });
 }
 
 const MAX_INSIGHT_CUSTOMERS = 500;

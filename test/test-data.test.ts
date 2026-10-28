@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import worker, { type AppEnv } from "../src/index";
-import { fakeLedgers } from "./helpers";
+import { fakeLedgers, fakeSessions } from "./helpers";
 
 const dir = `${import.meta.dirname}/../test-data`;
 const read = (path: string) => readFileSync(`${dir}/${path}`, "utf8");
@@ -14,7 +14,7 @@ const set = (folder: string) => ({
   invoices: read(`${folder}/invoices.csv`),
   creditMemos: read(`${folder}/credit_memos.csv`),
 });
-const env = (): AppEnv => ({ LEDGER: fakeLedgers(), AI: { run: async () => { throw new Error("AI is not part of these checks"); } } });
+const env = (): AppEnv => ({ LEDGER: fakeLedgers(), SESSION: fakeSessions(), AI: { run: async () => { throw new Error("AI is not part of these checks"); } } });
 
 async function check(files: object) {
   const res = await worker.fetch(
@@ -193,7 +193,7 @@ describe("3-security", () => {
 describe("4-stress", () => {
   it("many_exceptions: all 500 calculated results return, and AI calls stop at 50", async () => {
     let calls = 0;
-    const e: AppEnv = { LEDGER: fakeLedgers(), AI: { run: async () => { calls++; throw new Error("4006: daily free allocation"); } } };
+    const e: AppEnv = { LEDGER: fakeLedgers(), SESSION: fakeSessions(), AI: { run: async () => { calls++; throw new Error("4006: daily free allocation"); } } };
     const res = await worker.fetch(
       new Request("http://x/api/reconcile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ files: set("4-stress/many_exceptions") }) }),
       e,

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { inventedNumbers, narrateInsights, type AiRunner } from "../src/ai";
 import worker, { type AppEnv } from "../src/index";
 import { computeInsights, insightFacts, type InsightIssue } from "../src/insights";
-import { fakeLedgers } from "./helpers";
+import { fakeLedgers, fakeSessions } from "./helpers";
 
 const SAMPLE_CUSTOMERS = ["C001", "C002", "C003", "C004", "C005", "C006", "C007", "C008", "C009", "C010"];
 const env = (ai?: AiRunner): AppEnv => ({
-  LEDGER: fakeLedgers(),
+  LEDGER: fakeLedgers(), SESSION: fakeSessions(),
   AI: ai ?? { run: async () => ({ response: { explanation: "e", likely_cause: "c", suggested_fix: "f", precedent_suggestion: "", summary: "s" } }) },
 });
 const post = (e: AppEnv, path: string, body: unknown) =>
