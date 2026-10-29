@@ -1,5 +1,7 @@
 # Billing Reconciliation Assistant
 
+**How this was built with AI:** [PROMPTS.md](PROMPTS.md) has every prompt given to Claude Code, verbatim and in order. [docs/design-notes.md](docs/design-notes.md) covers the planning and review done with Claude beforehand.
+
 A small AI-powered app on Cloudflare that checks whether customer invoices match actual usage and plan terms. It explains each mismatch in plain English and keeps a lasting history of issues and decisions for each customer.
 
 Built for the Cloudflare optional assignment (Senior Director of Engineering, Billing Platform). The build spec is in [docs/](<docs/Cloudflare Assignment Spec - Billing Reconciliation Assistant.md>).
