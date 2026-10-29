@@ -3,6 +3,7 @@
 Every prompt I gave Claude Code while building this project, verbatim and in time order, each followed by a short summary of what it did. It covers one Claude Code session, which ran from 2026-10-27 20:39 UTC to 2026-10-29 01:36 UTC.
 
 - **Source:** extracted from the session transcript file, not reconstructed from memory.
+- **Times:** shown in UTC. Commit times on GitHub show US Eastern (UTC−4), so a commit at 20:27 ET follows a prompt at 00:18 UTC the next day.
 - **Left out:** tool output, system messages, and automatic notifications such as background tasks finishing.
 - **Included:** messages sent while Claude Code was working. Some prompts are reply buttons I clicked; their text is what was sent.
 - **Redacted:** a Cloudflare account ID, local folder paths and one pasted usage page, each marked in square brackets.
