@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { AiRunner } from "../src/ai";
-import { chatContext, customersFor } from "../src/chat";
+import { chatContext, customersFor, parse } from "../src/chat";
 import worker, { type AppEnv } from "../src/index";
 import { MAX_QUESTIONS_PER_SESSION, Session } from "../src/session";
 import { fakeLedgers, fakeSessions, memorySql } from "./helpers";
@@ -37,7 +37,7 @@ async function setup(files?: object) {
     return { status: r.status, body: (await r.json()) as any, prompt: ai.prompts.at(-1) };
   };
   /** The prompt's calculated context and its quoted sections, as the model received them. */
-  const promptParts = (p = ai.prompts.at(-1)) => JSON.parse(p!.messages[1]!.content.replace(/^context:\n/, ""));
+  const promptParts = (p = ai.prompts.at(-1)) => JSON.parse(p!.messages[0]!.content.split("\nCONTEXT\n")[1]!);
   return { ai, e, data, ask, askRaw, promptParts };
 }
 
@@ -112,7 +112,7 @@ describe("chat sessions", () => {
     await ask("Why was C003 flagged?");
     ai.says({ answer: "The contract's 15% discount is missing.", cited_findings: [], missing_information: "" });
     await ask("And the discount?");
-    const turns = ai.prompts.at(-1)!.messages.slice(3).map((m) => [m.role, m.content]);
+    const turns = ai.prompts.at(-1)!.messages.slice(1).map((m) => [m.role, m.content]);
     expect(turns).toEqual([
       ["user", "Why was C003 flagged?"],
       ["assistant", "I could not answer that from the calculated results."], // the rejected "$999.00" is never repeated
@@ -252,6 +252,8 @@ describe("session storage", () => {
     expect(customersFor("what about INV-2?", null, m, findings, [])).toEqual(["C2"]);
     const recent = [{ role: "analyst", customers: ["C10"] }] as never[];
     expect(customersFor("has this happened before?", null, m, findings, recent)).toEqual(["C10"]);
+    // "this check" is not a reference back to the previous customer
+    expect(customersFor("which issue costs the most in this check?", null, m, findings, recent)).toEqual([]);
   });
 
   it("limits the overview to the largest findings", () => {
@@ -259,5 +261,47 @@ describe("session storage", () => {
     const ctx = chatContext({ meta, findings: many, customers: [], histories: {}, focus: null });
     expect(ctx.findingIds).toHaveLength(10);
     expect(ctx.findingIds[0]).toBe("I39:x");
+  });
+});
+
+describe("reading real Workers AI replies", () => {
+  const ids = ["INV-2026-10-002:overage_on_total", "INV-2026-10-004:tax_wrong_state"];
+
+  it("reads the OpenAI-style shape Workers AI returns for chat", () => {
+    const reply = { choices: [{ message: { content: '{"answer": "Overcharged $500.00.", "cited_findings": "INV-2026-10-002:overage_on_total", "missing_information": ""}' } }] };
+    expect(parse(reply, ids)).toEqual({ answer: "Overcharged $500.00.", cited: ["INV-2026-10-002:overage_on_total"], missing: "" });
+  });
+
+  it("salvages the answer from malformed JSON, as seen live (a stray quote, a missing field)", () => {
+    const content = `{"answer": "The overage charged on total usage issue costs customers $500.00.", "cited_findings": ["INV-2026-10-002:overage_on_total']}`;
+    expect(parse({ choices: [{ message: { content } }] }, ids)).toEqual({
+      answer: "The overage charged on total usage issue costs customers $500.00.",
+      cited: ["INV-2026-10-002:overage_on_total"],
+      missing: "",
+    });
+  });
+
+  it("cuts a context field label the model appended to its answer", () => {
+    const answer = "INV-2026-10-002 was overcharged $500.00, calculated_summary: Overage was charged on all 12,500 units.";
+    expect(parse({ response: { answer, cited_findings: "", missing_information: "" } }, ids)?.answer).toBe("INV-2026-10-002 was overcharged $500.00.");
+  });
+
+  it("drops a field name used mid-sentence", () => {
+    const answer = "INV-2026-10-001 was flagged because of a proration error, the calculated_summary is The plan changed mid-period.";
+    expect(parse({ response: { answer, cited_findings: "", missing_information: "" } }, ids)?.answer).toBe(
+      "INV-2026-10-001 was flagged because of a proration error, The plan changed mid-period.",
+    );
+  });
+
+  it("cites only finding IDs that are in the context", () => {
+    expect(parse({ response: { answer: "See INV-9:x and INV-2026-10-004:tax_wrong_state.", cited_findings: "INV-9:x", missing_information: "" } }, ids)?.cited).toEqual(["INV-2026-10-004:tax_wrong_state"]);
+  });
+
+  it("still gives the whole-check overview when a question is about one customer", async () => {
+    const { ask, promptParts } = await setup();
+    await ask("Has C004 had this issue before?");
+    const { context } = promptParts();
+    expect(context.overview.by_issue_largest_first[0].issue).toBe("overage charged on total usage");
+    expect(context.findings_below_are_only_for).toEqual(["C004"]);
   });
 });
