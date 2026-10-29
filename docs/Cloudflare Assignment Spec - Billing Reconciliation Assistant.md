@@ -103,7 +103,7 @@ This mirrors real billing systems. Credit memos (Stripe credit notes, Zuora cred
 
 ### Rows that can't be read
 
-- **Whole-file errors stop the check.** A file that can't be read as a whole (empty, missing a column, header only, over 5 MB, over 20,000 rows) stops the check with one clear error.
+- **Whole-file errors stop the check.** A file that can't be read as a whole (empty, missing a column, header only, over 20,000 rows) stops the check with one clear error, as does a set of files over 5 MB in total.
 - **Bad rows are listed, and the rest of the file is used.** Each bad row is shown with its file, line and reason.
 - **No customer is checked on partial data.** A customer with a rejected plan, usage or invoice row is marked "not checked", never reported as clean.
 - **Rejected credit memos:** a rejected memo row only affects the credits that cite it.

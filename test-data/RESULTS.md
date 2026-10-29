@@ -9,7 +9,7 @@ Summary: **29 of 30 functional cases match the README.** F22 differs on purpose,
 - **A bad row does not sink the file.** Each unreadable row is listed under *Data checks* with its file, line and reason, and the rest of the file is used.
 - **No customer is checked on partial data.** A customer with a rejected plan, usage or invoice row is listed as *not checked*, never reported as clean.
 - **Rejected credit memos.** A rejected memo row only affects invoices that cite that memo. Those credits are flagged as unsupported.
-- **Whole-file errors stop the check.** If a file can't be read at all (empty, missing a column, header only, over 5 MB, over 20,000 rows), the check stops with one clear error.
+- **Whole-file errors stop the check.** If a file can't be read at all (empty, missing a column, header only, over 20,000 rows), or the files together are over 5 MB, the check stops with one clear error.
 - **Notes explain how the data was read.** The app adds a note whenever it interprets data, for example a customer ID whose case was changed, a usage adjustment, or an unpriced product.
 
 ## 1-functional

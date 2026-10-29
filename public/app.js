@@ -116,6 +116,7 @@ const TOUR_STEPS = [
     text: "See persistence at work: C004's “Seen before” suggestion",
     show: () => showCard("INV-2026-10-004:tax_wrong_state", ".block.precedent").then(() => markTour("precedent")),
   },
+  { id: "ask", text: "Ask the chat a question, such as which issue costs the most", show: () => showChat("Which issue costs customers the most in this check?") },
   { id: "decide", text: "Resolve or escalate an issue, with a note", show: () => showFirstOpen() },
   { id: "history", text: "Open a customer's history to see the audit trail", show: () => withResults(() => openHistory("C004")) },
 ];
@@ -221,6 +222,16 @@ function showCard(findingId, innerSelector) {
     const details = card.closest("details");
     if (details) details.open = true;
     spotlight((innerSelector && card.querySelector(innerSelector)) || card);
+  });
+}
+
+/** Bring the chat panel into view with a question ready to send. */
+function showChat(question) {
+  return withResults(() => {
+    if (chatEl.hidden) return;
+    chatInput.value = question;
+    spotlight(chatEl);
+    chatInput.focus({ preventScroll: true });
   });
 }
 
@@ -414,6 +425,7 @@ async function sendQuestion() {
     });
     chat.messages.push(...messages);
     chat.focus = null;
+    markTour("ask");
   } catch (e) {
     chat.error = `${capitalize(e.message)}${/[.!?]$/.test(e.message) ? "" : "."}`;
     chatInput.value = question; // nothing was lost

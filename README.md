@@ -1,12 +1,20 @@
 # Billing Reconciliation Assistant
 
-**How this was built with AI:** [PROMPTS.md](PROMPTS.md) has every prompt given to Claude Code, verbatim and in order. [docs/design-notes.md](docs/design-notes.md) covers the planning and review done with Claude beforehand.
+**How this was built with AI:** [PROMPTS.md](PROMPTS.md) has every prompt from the Claude Code build session, verbatim and in order. [docs/design-notes.md](docs/design-notes.md) covers the planning and review done with Claude beforehand.
 
 A small AI-powered app on Cloudflare that checks whether customer invoices match actual usage and plan terms. It explains each mismatch in plain English and keeps a lasting history of issues and decisions for each customer.
 
 Built for the Cloudflare optional assignment (Senior Director of Engineering, Billing Platform). The build spec is in [docs/](<docs/Cloudflare Assignment Spec - Billing Reconciliation Assistant.md>).
 
 **Live demo:** https://billing-reconciliation-assistant.denitza-krasteva.workers.dev. Click **Load sample data**. No files or sign-in are needed.
+
+## Two-minute tour
+
+1. **Load sample data.** Ten invoices are checked in a few seconds. Six are flagged, one is explained, and three are clean. Every flagged card shows the calculated amounts and an AI explanation.
+2. **Find C004's card** (wrong-state sales tax). Its "Seen before" line comes from that customer's history: the same error was resolved in September, so the fix didn't hold.
+3. **Ask the chat:** "Which issue costs customers the most in this check?" The answer names the $500.00 overage and links to its card.
+4. **Then ask:** "What would the total be if we waived all overage?" That figure was never calculated, so the app won't give one. Either the model says it isn't in the results, or, if it adds up a total itself, the answer is discarded.
+5. **Resolve an issue with a note**, then open that customer's history to see the audit trail. Resolutions are final.
 
 ## Design principle: code calculates, AI explains
 
@@ -42,6 +50,7 @@ The Worker coordinates each check in [src/index.ts](src/index.ts):
 2. It asks each affected customer's Durable Object for matching past issues.
 3. It sends up to 50 explanation calls to Workers AI in parallel, each with a 10-second timeout.
 4. It records the results to each customer's ledger.
+5. It opens a review session for the chat, holding that check's calculated results.
 
 Calculation never waits on the AI or on storage. If either fails, the results still return.
 
@@ -57,7 +66,7 @@ When a new finding matches a past decided issue for the same customer, the model
 
 ### Chat
 
-Below the results, the analyst can ask about them in plain English. Each card also has an **Ask** button that scopes the question to that finding. Suggested questions are built from the current results.
+Between Insights and the issue list, the analyst can ask about the results in plain English. Each card also has an **Ask** button that scopes the question to that finding. Suggested questions are built from the current results.
 
 How a question is answered ([src/chat.ts](src/chat.ts)):
 
@@ -169,9 +178,9 @@ The demo uses the four files in [sample-data/](sample-data/): 10 customers in Oc
 - **CSRF.** Every POST must be same-origin `application/json`; cross-site requests get a 403.
 - **Headers.** A strict Content Security Policy, `nosniff`, `no-referrer` and `no-store` on API responses.
 - **Limits:**
-  - 5 MB and 20,000 rows per file in one check;
-  - 50 AI calls per check, 10 seconds each;
-  - 40 chat questions per check, 500 characters each;
+  - 5 MB of files per check, and 20,000 rows per file;
+  - 50 AI explanation calls per check, 10 seconds each;
+  - 40 chat questions per check, 500 characters each, 20 seconds per answer;
   - 1,000 characters per note.
 - **Audit trail.** Events are append-only and resolutions are final, both enforced in the database.
 
@@ -200,6 +209,16 @@ It also has a short AI summary. Every number in that summary must appear in the 
 | [public/](public/) | The page, styles and security headers |
 | [sample-data/](sample-data/), [docs/](docs/) | Demo files and expected results |
 | [test/](test/), [test-data/](test-data/) | Unit tests and the edge-case suite |
+
+## Known limitations
+
+- **Illustrative tax.** The state sales tax table has a few rates, chosen so a wrong-state charge can be traced. It is not a tax engine.
+- **One metered product per plan.** Usage of any other product is reported as unpriced, not billed or checked.
+- **One billing time zone.** Usage is assigned to months in America/New_York for every customer. Production would take the time zone from each contract.
+- **Typed analyst name.** Decisions record the name typed on the page, not a verified identity, until sign-in is added.
+- **One check per request.** Large exports must be split to stay under 5 MB per check, and only the first 50 findings get AI explanations.
+- **Chat declines rather than computes.** A question that needs a figure the code didn't calculate gets no number. Sometimes the model says the figure isn't in the results; sometimes its answer is discarded.
+- **Insights at scale.** Insights read each customer's Durable Object, so 500 customers take about 25 seconds. Production would use an aggregate store (see next steps).
 
 ## Next steps
 
