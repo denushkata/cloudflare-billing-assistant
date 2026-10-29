@@ -8,6 +8,7 @@ Every prompt I gave Claude Code while building this project, verbatim and in tim
 - **Redacted:** a Cloudflare account ID, local folder paths and one pasted usage page, each marked in square brackets.
 - **Reworded:** one prompt (#30), for readability without changing its meaning. It is marked as reworded.
 - **Screenshots:** described, not embedded.
+- **Ends here:** the file stops at the prompt that created it (#41). Later prompts were about editing this file and repository housekeeping, and are not included.
 
 Some longer prompts (#1, #3, #7, #30, #35) were drafted with Claude on claude.ai during planning and review, then pasted here. See docs/design-notes.md.
 
@@ -346,7 +347,7 @@ go ahead and update the spec with latest changes and push
 Yes, deploy the chat panel with npm run deploy now, then keep checking the live AI and run the full retest when it answers.
 ```
 
-**What Claude Code did:** Deployed the chat panel, verified it on the live site, and started checking the live AI every 10 minutes for the full retest.
+**What Claude Code did:** Deployed the chat panel, verified it on the live site, and checked the live AI every 10 minutes until it answered. The retest then passed for all 7 explanations, the "seen before" suggestion and the insights summary. The chat failed against the real model: a different reply shape, malformed JSON, vague answers and a timeout. I diagnosed it from the raw replies, fixed it, added tests built from those replies, and redeployed with approval. Chat then answered 4 of 5 questions correctly and refused the fifth, because the model had added up a total itself ($531.80), which the code had never calculated.
 
 ### 40. 2026-10-29 01:15 UTC · pasted
 
